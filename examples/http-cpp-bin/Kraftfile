@@ -1,0 +1,9 @@
+spec: v0.6
+
+name: http-cpp-bin
+
+runtime: index.unikraft.io/unikraft.org/base:latest
+
+rootfs: ./Dockerfile
+
+cmd: ["/http_server"]
