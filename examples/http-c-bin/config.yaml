@@ -1,0 +1,4 @@
+networking: True
+accel: True
+memory: 128
+kerneldir: ../../kernels
