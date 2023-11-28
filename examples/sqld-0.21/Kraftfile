@@ -1,0 +1,9 @@
+spec: v0.6
+
+name: sqld
+
+runtime: index.unikraft.io/unikraft.org/base
+
+rootfs: ./Dockerfile
+
+cmd: ["/usr/local/bin/sqld", "--http-listen-addr", "0.0.0.0:8080"]
