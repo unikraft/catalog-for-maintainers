@@ -1,0 +1,9 @@
+spec: v0.6
+
+name: python3
+
+runtime: index.unikraft.io/unikraft.org/base:latest
+
+rootfs: ./Dockerfile
+
+cmd: ["/usr/local/bin/python3", "/server.py"]
