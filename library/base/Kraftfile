@@ -8,7 +8,7 @@ template:
 
 unikraft:
   source: https://github.com/unikraft/unikraft
-  version: testing
+  version: base
   kconfig:
     CONFIG_APPELFLOADER_VFSEXEC_EXECBIT: 'n'
     CONFIG_HAVE_PAGING_DIRECTMAP: 'y'
@@ -46,9 +46,12 @@ unikraft:
     CONFIG_LIBUKBOOT_BANNER_MINIMAL: 'y'
     CONFIG_LIBUKBOOT_HEAP_BASE: '0x400000000'
     CONFIG_LIBUKCPIO: 'y'
-    CONFIG_LIBUKDEBUG_CRASH_SCREEN: 'n'
-    CONFIG_LIBUKDEBUG_ENABLE_ASSERT: 'n'
-    CONFIG_LIBUKDEBUG_PRINT_TIME: 'n'
+    CONFIG_LIBUKDEBUG_CRASH_SCREEN: 'y'
+    CONFIG_LIBUKDEBUG_ENABLE_ASSERT: 'y'
+    CONFIG_LIBUKDEBUG_PRINT_SRCNAME: 'n'
+    CONFIG_LIBUKDEBUG_PRINT_TIME: 'y'
+    CONFIG_LIBUKDEBUG_PRINTK_ERR: 'y'
+    CONFIG_LIBUKDEBUG_PRINTK: 'y'
     CONFIG_LIBUKFALLOC: 'y'
     CONFIG_LIBUKMPI: 'n'
     CONFIG_LIBUKSIGNAL: 'y'
@@ -67,7 +70,7 @@ unikraft:
 libraries:
   lwip:
     source: https://github.com/unikraft/lib-lwip
-    version: staging
+    version: stable
   libelf:
     source: https://github.com/unikraft/lib-libelf
     version: staging
