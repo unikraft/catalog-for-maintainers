@@ -1,0 +1,9 @@
+spec: v0.6
+
+name: http-node
+
+runtime: index.unikraft.io/unikraft.org/base:latest
+
+rootfs: ./Dockerfile
+
+cmd: ["/usr/local/bin/node", "/rest-express/src/index.js"]
