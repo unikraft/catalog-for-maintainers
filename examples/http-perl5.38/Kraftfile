@@ -1,0 +1,9 @@
+spec: v0.6
+
+name: http-perl
+
+runtime: index.unikraft.io/official/base:latest
+
+rootfs: ./Dockerfile
+
+cmd: ["/usr/local/bin/perl", "/http_server.pl"]
