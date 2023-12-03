@@ -1,0 +1,9 @@
+spec: v0.6
+
+name: http-boost
+
+runtime: index.unikraft.io/official/base:latest
+
+rootfs: ./Dockerfile
+
+cmd: ["/http_server"]
