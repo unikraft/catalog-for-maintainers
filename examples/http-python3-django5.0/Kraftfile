@@ -1,0 +1,9 @@
+spec: v0.6
+
+name: python-django
+
+runtime: index.unikraft.io/unikraft.org/base:latest
+
+rootfs: ./Dockerfile
+
+cmd: ["/usr/local/bin/python3", "/app/manage.py", "runserver", "0.0.0.0:8080"]
