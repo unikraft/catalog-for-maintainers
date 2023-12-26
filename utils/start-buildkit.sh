@@ -19,7 +19,7 @@ if test $? -eq 0; then
 else
     echo "Installing 'buildkitd' container ... "
     docker run -d --name buildkitd --privileged moby/buildkit:latest
-    exit $?
+    return $?
 fi
 
 test "$(docker container inspect -f '{{.State.Running}}' buildkitd 2> /dev/null)" = "true"
@@ -28,5 +28,5 @@ if test $? -eq 0; then
 else
     echo "Starting 'buildkitd' container ... "
     docker start buildkitd
-    exit $?
+    return $?
 fi
