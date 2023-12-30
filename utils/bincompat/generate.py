@@ -111,8 +111,7 @@ def generate_run_fc_json(config, kernel):
         stream.write(f'    "kernel_image_path": "{kernel_path}",\n')
         stream.write(f'    "boot_args": "{kernel} ')
         if config["networking"]:
-            stream.write("netdev.ipv4_addr=172.44.0.2 netdev.ipv4_gw_addr=172.44.0.1 ")
-            stream.write("netdev.ipv4_subnet_mask=255.255.255.0 ")
+            stream.write("netdev.ip=172.44.0.2/24:172.44.0.1 ")
         stream.write('vfs.fstab=[ \\"initrd:/:initrd:::\\" ] ')
         stream.write(f"-- {config['cmd']}\"")
         stream.write(',\n    "initrd_path": "rootfs.cpio"')
@@ -206,9 +205,7 @@ def generate_run_qemu(config, kernel):
         if config["networking"]:
             stream.write("    -netdev bridge,id=en0,br=virbr0 ")
             stream.write("-device virtio-net-pci,netdev=en0 \\\n")
-            stream.write('    -append "netdev.ipv4_addr=172.44.0.2 ')
-            stream.write("netdev.ipv4_gw_addr=172.44.0.1 ")
-            stream.write("netdev.ipv4_subnet_mask=255.255.255.0 ")
+            stream.write('    -append "netdev.ip=172.44.0.2/24:172.44.0.1 ')
             stream.write('vfs.fstab=[ \\"initrd:/:initrd:::\\" ] ')
             stream.write('-- $cmd" \\\n')
         else:
