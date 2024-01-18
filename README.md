@@ -91,7 +91,6 @@ Follow the specific instructions in the `README.md` file in the application dire
 To make it easier to run application in bincompat mode, use the generated scripts.
 Follow the steps:
 
-<<<<<<< HEAD
 1. Build the application root filesystem as an initial ramdisk from the `Dockerfile` using:
 
    ```console
