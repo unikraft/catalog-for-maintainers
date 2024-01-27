@@ -27,7 +27,7 @@ A typical directory for a bincompat app contains:
 
 * `Kraftfile`: build / run rules, including pulling the `base` image
 * `Dockerfile`: filesystem, including binary and libraries
-* `Makefile`: used to generate the root filesystem from the `Dockerfile` rules
+* `Makefile.docker`: used to generate the root filesystem from the `Dockerfile` rules
 * `README.md`: specific application instructions, such as starting and testing an application
 * `config.yaml`: configuration file to generate script files to run the application
 * specific application files, such as configuration files and source code files
@@ -53,73 +53,151 @@ In case you have already done them for other bincompat runs, you can skip them:
    This can be either [Docker Engine](https://docs.docker.com/engine/) or [Docker Desktop](https://docs.docker.com/desktop/).
 
 1. Start a [BuildKit](https://docs.docker.com/build/buildkit/) container to be used by KraftKit to build the filesystem from the Dockerfile.
-   Source the corresponding script from the `utils/` directory.
-   This can be one of the following commands, depending on the location of your application directory:
+   While in the top-level directory of this repository, source the `utils/start-buildkit.sh` directory:
 
    ```console
-   source ../../utils/start-buildkit.sh
-   source ../../../utils/start-buildkit.sh
+   source utils/start-buildkit.sh
    ```
 
-1. Running the application requires kernel images (called `base` kernel images).
-   If not already generated, generate the kernels in the `kernels/` directory, while inside the `library/base/` directory:
-   This can be one of the following commands, depending on the location of your application directory:
-
-   ```console
-   ../../utils/bincompat/base-build-all.sh
-   ../../../utils/bincompat/base-build-all.sh
-   ```
-
-## Specific Setup
-
-`config.yaml` is used to generate the scripts and configuration files required to build and run the application.
-To generate these files, run one of the following commands, depending on the location of your application directory:
-
-```console
-../../utils/bincompat/generate.py
-```
-
-It generates the `run*` scripts and configuration files used to run the application in bincompat mode using different tools / VMMs.
-
-### Build, Run and Use
+### Basic Build, Run and Use
 
 You build and run the application using [KraftKit](https://github.com/unikraft/kraftkit).
 Follow the specific instructions in the `README.md` file in the application directory for specifics on building and running with KraftKit and on using the application.
 
-### Scripted Run
+### Scripted Build, Run and Use
 
-To make it easier to run application in bincompat mode, use the generated scripts.
-Follow the steps:
+For testing, debugging and, generally, for finer-grained control over the build and run process, we generate scripts that wrap KraftKit, Make, QEMU, Firecracker and other commands.
 
-1. Build the application root filesystem as an initial ramdisk from the `Dockerfile` using:
+The `config.yaml` file basic configuration for building and runing the application.
+It is used to generate the scripts and configuration files required to build and run the application.
+To generate these files, run the generator script:
+
+```console
+../../../utils/bincompat/generate.einitrd.py
+```
+
+The generator script uses the `config.yaml` file to generates the `scripts/` directory and the `Makefile` file used to to configure, build and run the application with Unikraft.
+
+The `scripts/` directory has a structure similar to the one below.
+Note that the output may differ on your system, depending on the compilers and compiler versions you have installed:
+
+```text
+scripts/
+|-- build/
+|   |-- kraft-fc-x86_64.sh*
+|   |-- kraft-qemu-x86_64.sh*
+|   |-- make-clang-13-fc-x86_64.sh*
+|   |-- make-clang-13-qemu-x86_64.sh*
+|   |-- make-clang-15-fc-x86_64.sh*
+|   |-- make-clang-15-qemu-x86_64.sh*
+|   |-- make-gcc-10-fc-x86_64.sh*
+|   |-- make-gcc-10-qemu-x86_64.sh*
+|   |-- make-gcc-11-fc-x86_64.sh*
+|   |-- make-gcc-11-qemu-x86_64.sh*
+|   |-- make-gcc-12-fc-x86_64.sh*
+|   |-- make-gcc-12-qemu-x86_64.sh*
+|   |-- make-gcc-9-fc-x86_64.sh*
+|   `-- make-gcc-9-qemu-x86_64.sh*
+|-- defconfig/
+|   |-- fc-x86_64
+|   `-- qemu-x86_64
+|-- kernel/
+|-- run/
+|   |-- clang-13-fc-x86_64-nofs.json
+|   |-- clang-13-fc-x86_64-nofs.sh*
+|   |-- clang-13-qemu-x86_64-nofs.sh*
+|   |-- clang-15-fc-x86_64-nofs.json
+|   |-- clang-15-fc-x86_64-nofs.sh*
+|   |-- clang-15-qemu-x86_64-nofs.sh*
+|   |-- gcc-10-fc-x86_64-nofs.json
+|   |-- gcc-10-fc-x86_64-nofs.sh*
+|   |-- gcc-10-qemu-x86_64-nofs.sh*
+|   |-- gcc-11-fc-x86_64-nofs.json
+|   |-- gcc-11-fc-x86_64-nofs.sh*
+|   |-- gcc-11-qemu-x86_64-nofs.sh*
+|   |-- gcc-12-fc-x86_64-nofs.json
+|   |-- gcc-12-fc-x86_64-nofs.sh*
+|   |-- gcc-12-qemu-x86_64-nofs.sh*
+|   |-- gcc-9-fc-x86_64-nofs.json
+|   |-- gcc-9-fc-x86_64-nofs.sh*
+|   |-- gcc-9-qemu-x86_64-nofs.sh*
+|   |-- kraft-fc-x86_64-nofs.sh*
+|   `-- kraft-qemu-x86_64-nofs.sh*
+`-- setup.sh*
+```
+
+The contents of the `scripts/` directory are:
+
+- `setup.sh`: script to clone and set up required repositories in the `workdir/` directory
+- `defconfig/`: generated configuration files required by the Make-based build;
+  they are generated from `Kraftfile`
+- `build/`: generated build scripts;
+  there are different build scripts for using Kraft or Make or for different platforms, architectures and compilers;
+- `run/`: generated run scripts;
+  there is a corresponding run script for each build output from the build phase;
+  Firecracker builds also generate a corresponding `.json` file;
+- `kernels/`: directory where to store generated builds (kernels).
+
+To use the scripts, follow the steps below:
+
+1. Run the `setup.sh` script to clone the required support repositories in the `workdir/` directory:
 
    ```console
-   make initrd
+   ./scripts/setup.sh
    ```
 
-   This creates the `rootfs/` directory and the `rootfs.cpio` file with the root filesystem:
+   The `workdir/` directory will have contents similar to:
+
+   ```text
+   workdir/
+   |-- apps/
+   |   `-- elfloader/
+   |-- libs/
+   |   |-- libelf/
+   |   `-- lwip/
+   `-- unikraft/
+   ```
+
+1. Run a build script from the `build/` directory, such as:
 
    ```console
-   tree rootfs/
+   ./scripts/build/make-clang-13-fc-x86_64.sh
    ```
 
-1. Run the scripts:
+   The resulting kernel image is placed in the `kernels/` directory:
 
    ```console
-   ./run-qemu-x86_64.sh
-   ./run-fc-x86_64.sh
-   ./kraft-run-qemu.sh
+   $ ls -lh scripts/kernel/clang-13-nginx_fc-x86_64
+   -rwxr-xr-x 2 razvand razvand 15M Jan 27 13:42 scripts/kernel/clang-13-nginx_fc-x86_64
    ```
 
-   All scripts start a local instance of the `base` image with the application running in bincompat mode.
-   The application filesystem (binary executable, libraries, configuration files) are packed inside the `rootfs.cpio` initrd file.
-   There is no Kraft script to run Firecracker, as Kraft doesn't currently support running images with networking support using Firecracker.
-
-1. You can run the `strace` or `debug` kernels with the scripts:
+1. Use the corresponding run script in the `run/` directory, such as:
 
    ```console
-   ./run-qemu-x86_64.sh ../../kernels/base_qemu-x86_64-strace
-   ./run-qemu-x86_64.sh ../../kernels/base_qemu-x86_64-debug
+   ./scripts/run/clang-13-fc-x86_64-nofs.sh
    ```
 
-1. Build, run and use the application as detailed in the application `README.md`.
+   A successful run shows an output such as:
+
+   ```text
+   1: Set IPv4 address 172.44.0.2 mask 255.255.255.0 gw 172.44.0.1
+   en1: Added
+   en1: Interface is up
+   Powered by Unikraft Telesto (0.16.1~a922af77)
+   ```
+
+Depending on the running environment, use the following commands to close the virtual machine (if it's a server or something that keeps running):
+
+- For KraftKit, use `Ctrl+c` to close the console output and then close the virtual machine with:
+
+  ```console
+  kraft rm --all
+  ```
+
+- For QEMU, use `Ctrl+a x` to close the virtual machine.
+
+- For Firecracker, open a new console and use, as `root` (prefix with `sudo` if required):
+
+  ```console
+  pkill -f firecracker
+  ```
