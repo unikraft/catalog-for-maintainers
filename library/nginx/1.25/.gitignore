@@ -1,0 +1,9 @@
+/Makefile
+/Makefile.uk
+/scripts/
+/workdir/
+/kraft-nginx_*
+/nginx_*
+/initrd.cpio
+/rootfs.cpio
+/rootfs/
