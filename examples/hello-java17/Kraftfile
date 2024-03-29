@@ -1,0 +1,9 @@
+spec: v0.6
+
+name: hello-java
+
+runtime: index.unikraft.io/unikraft.org/base:latest
+
+rootfs: ./Dockerfile
+
+cmd: ["/usr/lib/jvm/java-17-openjdk-amd64/bin/java", "Hello"]
