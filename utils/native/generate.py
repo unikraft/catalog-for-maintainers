@@ -74,7 +74,7 @@ TEMPLATE_BUILD_KRAFT = """#!/bin/sh
 
 rm -fr .unikraft/build
 rm -f .config.*
-kraft build --log-level debug --log-type basic --no-cache --no-update --plat {} --arch {}
+KRAFTKIT_BUILDKIT_HOST=docker-container://buildkitd kraft build --log-level debug --log-type basic --no-cache --no-update --plat {} --arch {}
 test $? -eq 0 && ln -fn .unikraft/build/{}_{}-{} kraft-{}_{}-{}
 """
 
