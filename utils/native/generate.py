@@ -43,8 +43,8 @@ make -j $(nproc)
 test $? -eq 0 && ln -fn workdir/build/{}
 """
 
-TEMPLATE_BUILD_MAKE_EINITRD = """#!/bin/sh
-
+TEMPLATE_BUILD_MAKE_EINITRD = """#!/bin/bash
+{}
 # Create CPIO archive to be used as the embedded initrd.
 rootfs={}
 "$PWD"/workdir/unikraft/support/scripts/mkcpio initrd.cpio "$rootfs"
@@ -167,12 +167,18 @@ rm -fr "$rootfs"
 cp -r {} "$rootfs"
 """
 
+TEMPLATE_RUN_DOCKER_EXPORT = """
+IMAGE_NAME=unikraft-{} make -f {} export
+"""
+
 
 DEFCONFIG = "defconfig"
 SCRIPTS = "scripts"
 BUILD = "build"
 RUN = "run"
 TEST = "test"
+DOCKER = "docker"
+DOCKER_MAKEFILE = "docker.Makefile"
 CONFIG = "config.yaml"
 KRAFTCONFIG = "Kraftfile"
 
@@ -262,7 +268,11 @@ def generate_build_make(config, t):
 
     if t['einitrd']:
         defconfig = f"{t['plat']}-{t['arch']}-einitrd"
-        contents = TEMPLATE_BUILD_MAKE_EINITRD.format(config['rootfs'], defconfig, f"{t['name']}_{t['plat']}-{t['arch']}")
+        if config["docker"]:
+            docker_export = TEMPLATE_RUN_DOCKER_EXPORT.format(config['name'], os.path.join(config["dockerdir"], DOCKER_MAKEFILE))
+            contents = TEMPLATE_BUILD_MAKE_EINITRD.format(docker_export, config['rootfs'], defconfig, f"{t['name']}_{t['plat']}-{t['arch']}")
+        else:
+            contents = TEMPLATE_BUILD_MAKE_EINITRD.format("", config['rootfs'], defconfig, f"{t['name']}_{t['plat']}-{t['arch']}")
     else:
         defconfig = f"{t['plat']}-{t['arch']}"
         contents = TEMPLATE_BUILD_MAKE.format(defconfig, f"{t['name']}_{t['plat']}-{t['arch']}")
@@ -295,6 +305,9 @@ def generate_build(config):
 
     Scripts are generated in scripts/build/ directory.
     """
+
+    shutil.copy(os.path.join(os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), DOCKER), DOCKER_MAKEFILE),
+            os.path.join(config["dockerdir"], DOCKER_MAKEFILE))
 
     generate_build_makefile(config)
 
@@ -389,6 +402,8 @@ def generate_run_fc(config, target, fs):
             stream.write(RUN_COMMON_NET_COMMANDS)
             stream.write(RUN_FIRECRACKER_NET_COMMANDS)
         if fs == "initrd":
+            if config['docker']:
+                stream.write(TEMPLATE_RUN_DOCKER_EXPORT.format(f"{config['name']}", os.path.join(config["dockerdir"], DOCKER_MAKEFILE)))
             stream.write(TEMPLATE_RUN_CPIO_COMMANDS.format(f"{config['rootfs']}"))
         stream.write(RUN_FIRECRACKER_PREPARE)
         if config["networking"]:
@@ -423,9 +438,13 @@ def generate_run_qemu(config, target, fs):
             stream.write(RUN_QEMU_NET_COMMANDS)
         stream.write("\n")
         if fs == "initrd":
+            if config['docker']:
+                stream.write(TEMPLATE_RUN_DOCKER_EXPORT.format(f"{config['name']}", os.path.join(config["dockerdir"], DOCKER_MAKEFILE)))
             stream.write(TEMPLATE_RUN_CPIO_COMMANDS.format(f"{config['rootfs']}"))
         elif fs == "9pfs":
-                stream.write(TEMPLATE_RUN_9PFS_COMMANDS.format(f"{config['rootfs']}", f"{config['rootfs']}"))
+            if config['docker']:
+                stream.write(TEMPLATE_RUN_DOCKER_EXPORT.format(f"{config['name']}", os.path.join(config["dockerdir"], DOCKER_MAKEFILE)))
+            stream.write(TEMPLATE_RUN_9PFS_COMMANDS.format(f"{config['rootfs']}", f"{config['rootfs']}"))
         if config["networking"]:
             stream.write("sudo ")
         if target['arch'] == "x86_64":
@@ -568,6 +587,7 @@ def main():
     config["builddir"] = os.path.join(config["scriptsdir"], BUILD)
     config["rundir"] = os.path.join(config["scriptsdir"], RUN)
     config["testdir"] = os.path.join(config["scriptsdir"], TEST)
+    config["dockerdir"] = os.path.join(config["scriptsdir"], DOCKER)
 
     if not os.path.exists(config["scriptsdir"]):
         os.mkdir(config["scriptsdir"])
@@ -579,6 +599,8 @@ def main():
         os.mkdir(config["rundir"])
     if not os.path.exists(config["testdir"]):
         os.mkdir(config["testdir"])
+    if not os.path.exists(config["dockerdir"]):
+        os.mkdir(config["dockerdir"])
 
     try:
         with os.scandir(config["scriptsdir"]) as _:
@@ -623,19 +645,26 @@ def main():
             config["kconfig"] = data["unikraft"]["kconfig"]
 
     if not "name" in data.keys():
-        print(f"Error: 'name' attribute is not defined in '{KRAFTCONFIG}'", file=sys.stderr)
-        sys.exit(1)
-    config["name"] = data["name"]
+        pwd = os.path.basename(os.getcwd())
+        print(f"'name' attribute is not defined in '{KRAFTCONFIG}'")
+        print(f"Defaulting to directory name: '{pwd}'")
+        config["name"] = pwd
+    else:
+        config["name"] = data["name"]
 
     if not "cmd" in data.keys():
         config['cmd'] = None
     else:
         config["cmd"] = " ".join(c for c in data["cmd"])
 
+    config["docker"] = False
     if not "rootfs" in data.keys():
         config['rootfs'] = None
     else:
         config["rootfs"] = data["rootfs"]
+        if os.path.basename(config["rootfs"]) == "Dockerfile":
+            config["rootfs"] = "rootfs"
+            config["docker"] = True
 
     einitrd = False
     if "CONFIG_LIBVFSCORE_AUTOMOUNT_CI_EINITRD" in config["kconfig"].keys() and \
