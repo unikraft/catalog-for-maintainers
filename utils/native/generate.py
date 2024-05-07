@@ -33,6 +33,19 @@ done
 ln -sfn workdir .unikraft
 """
 
+TEMPLATE_SETUP_SCRIPT_TEMPLATE_APP = """#!/bin/sh
+
+test -d workdir/unikraft || git clone https://github.com/unikraft/unikraft workdir/unikraft
+
+for l in {}; do
+    test -d workdir/libs/"$l" || git clone https://github.com/unikraft/lib-"$l" workdir/libs/"$l"
+done
+
+test -d workdir/apps/{} || git clone {} workdir/apps/{}
+
+ln -sfn workdir .unikraft
+"""
+
 TEMPLATE_BUILD_MAKE = """#!/bin/sh
 
 make distclean
@@ -47,7 +60,7 @@ TEMPLATE_BUILD_MAKE_EINITRD = """#!/bin/bash
 {}
 # Create CPIO archive to be used as the embedded initrd.
 rootfs={}
-"$PWD"/workdir/unikraft/support/scripts/mkcpio initrd.cpio "$rootfs"
+"$PWD"/workdir/unikraft/support/scripts/mkcpio {}/initrd.cpio "$rootfs"
 
 make distclean
 UK_DEFCONFIG=$(pwd)/scripts/defconfig/{} make defconfig
@@ -75,16 +88,17 @@ if test $# -eq 1; then
 fi
 """
 
-TEMPLATE_BUILD_MAKEFILE = """UK_ROOT ?= $(PWD)/workdir/unikraft
+TEMPLATE_BUILD_MAKEFILE = """UK_APP ?= {}
+UK_ROOT ?= $(PWD)/workdir/unikraft
 UK_LIBS ?= $(PWD)/workdir/libs
 UK_BUILD ?= $(PWD)/workdir/build
 LIBS ?= {}
 
 all:
-	@$(MAKE) -C $(UK_ROOT) A=$(PWD) L=$(LIBS) O=$(UK_BUILD)
+	@$(MAKE) -C $(UK_ROOT) A=$(UK_APP) L=$(LIBS) O=$(UK_BUILD)
 
 $(MAKECMDGOALS):
-	@$(MAKE) -C $(UK_ROOT) A=$(PWD) L=$(LIBS) O=$(UK_BUILD) $(MAKECMDGOALS)
+	@$(MAKE) -C $(UK_ROOT) A=$(UK_APP) L=$(LIBS) O=$(UK_BUILD) $(MAKECMDGOALS)
 """
 
 RUN_COMMON_NET_COMMANDS = """
@@ -199,7 +213,11 @@ def generate_setup(config):
     """Generate shell script to set up repositories."""
 
     if config["libs"]:
-        contents = TEMPLATE_SETUP_SCRIPT.format(" ".join(l for l in config["libs"]))
+        if config["template"]:
+            contents = TEMPLATE_SETUP_SCRIPT_TEMPLATE_APP.format(" ".join(l for l in config["libs"]), \
+                    config["template_name"], config["template"], config["template_name"])
+        else:
+            contents = TEMPLATE_SETUP_SCRIPT.format(" ".join(l for l in config["libs"]))
     else:
         contents = TEMPLATE_SETUP_SCRIPT_NO_LIBS
 
@@ -251,9 +269,13 @@ def generate_build_makefile(config):
     """Generate Makefile to build kernel (with Make)."""
 
     if config["libs"]:
-        contents = TEMPLATE_BUILD_MAKEFILE.format(":".join(f"$(UK_LIBS)/{l}" for l in config["libs"]))
+        if config["template"]:
+            contents = TEMPLATE_BUILD_MAKEFILE.format(f"$(PWD)/workdir/apps/{config['template_name']}",
+                                                      ":".join(f"$(UK_LIBS)/{l}" for l in config["libs"]))
+        else:
+            contents = TEMPLATE_BUILD_MAKEFILE.format("$(PWD)", ":".join(f"$(UK_LIBS)/{l}" for l in config["libs"]))
     else:
-        contents = TEMPLATE_BUILD_MAKEFILE.format("")
+        contents = TEMPLATE_BUILD_MAKEFILE.format("$(PWD)", "")
 
     with open("Makefile", "w", encoding="utf-8") as stream:
         stream.write(contents)
@@ -270,9 +292,13 @@ def generate_build_make(config, t):
         defconfig = f"{t['plat']}-{t['arch']}-einitrd"
         if config["docker"]:
             docker_export = TEMPLATE_RUN_DOCKER_EXPORT.format(config['name'], os.path.join(config["dockerdir"], DOCKER_MAKEFILE))
-            contents = TEMPLATE_BUILD_MAKE_EINITRD.format(docker_export, config['rootfs'], defconfig, f"{t['name']}_{t['plat']}-{t['arch']}")
         else:
-            contents = TEMPLATE_BUILD_MAKE_EINITRD.format("", config['rootfs'], defconfig, f"{t['name']}_{t['plat']}-{t['arch']}")
+            docker_export = ""
+        if config["template"]:
+            initrd_base = f"$PWD/workdir/apps/{config['template_name']}"
+        else:
+            initrd_base = "."
+        contents = TEMPLATE_BUILD_MAKE_EINITRD.format(docker_export, config['rootfs'], initrd_base, defconfig, f"{t['name']}_{t['plat']}-{t['arch']}")
     else:
         defconfig = f"{t['plat']}-{t['arch']}"
         contents = TEMPLATE_BUILD_MAKE.format(defconfig, f"{t['name']}_{t['plat']}-{t['arch']}")
@@ -634,6 +660,10 @@ def main():
     if not isinstance(data, dict):
         print(f"Error: '{KRAFTCONFIG}' contents are not structured as a dictionary", file=sys.stderr)
         sys.exit(1)
+
+    if "template" in data.keys():
+        config["template"] = data["template"]["source"]
+        config["template_name"] = config["template"].split("/")[-1].removeprefix("app-").removesuffix(".git")
 
     # Load configuration in config.
     if not "unikraft" in data.keys():
