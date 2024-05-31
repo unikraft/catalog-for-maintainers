@@ -72,6 +72,43 @@ test_curl_check_message()
     fi
 }
 
+test_netcat_connect()
+{
+    port="$1"
+
+    # Check connection.
+    netcat -w 3 172.44.0.2 "$port" < /dev/null > /dev/null 2>&1
+    if test $? -ne 0; then
+        echo "Cannot connect to 172.44.0.2:$port" 1>&2
+        echo "FAILED"
+        clean_up
+        exit 1
+    fi
+}
+
+test_redis_connect()
+{
+    redis-cli -h 172.44.0.2 < /dev/null > /dev/null 2>&1
+    if test $? -ne 0; then
+        echo "Cannot connect Redis client" 1>&2
+        echo "FAILED"
+        clean_up
+        exit 1
+    fi
+}
+
+test_redis_cli()
+{
+    redis-cli -h 172.44.0.2 set a 1 > /dev/null 2>&1
+    redis-cli -h 172.44.0.2 get a > /dev/null 2>&1
+    if test $? -eq 1; then
+        echo "FAILED"
+        echo "Cannot talk to Redis server at 172.44.0.2" 1>&2
+        do_kill
+        exit 1
+    fi
+}
+
 end_with_success()
 {
     echo "PASSED"
