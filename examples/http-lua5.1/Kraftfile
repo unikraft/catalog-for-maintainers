@@ -1,0 +1,9 @@
+spec: v0.6
+
+name: http-lua
+
+runtime: index.unikraft.io/unikraft.org/base:latest
+
+rootfs: ./Dockerfile
+
+cmd: ["/usr/local/bin/lua", "/http_server.lua"]
