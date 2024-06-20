@@ -1,0 +1,3 @@
+networking: False
+accel: True
+memory: 256
