@@ -41,7 +41,7 @@ app-name/
     common.sh
     1/
       config.yaml
-      defconfig -> optional
+      defconfig | Kraftfile -> optional
       build
       run
       my-test-session/
