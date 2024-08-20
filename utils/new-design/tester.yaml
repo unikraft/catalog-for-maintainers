@@ -37,48 +37,38 @@ variants:
     - bridge
     - tap
 exclude_variants:
-  - e1:
-      networking: bridge
-      platform: firecracker
-  - e2:
-      netwoking: tap
-      platform: not firecracker
-  - e3:
-      bootloader: uefi
-      arch: not x86_64
-  - e4:
-      platform: firecracker
-      hypervisor: not kvm
-  - e5:
-      platform: xen
-      hypervisor: not xen
-  - e6:
-      platform: qemu
-      hypervisor: not kvm and not none
-  - e7:
-      platform: firecracker
-      rootfs: 9pfs
+  - networking: bridge
+    platform: firecracker
+  - networking: tap
+    platform: not firecracker
+  - bootloader: uefi
+    arch: not x86_64
+  - platform: firecracker
+    hypervisor: not kvm
+  - platform: xen
+    hypervisor: not xen
+  - platform: qemu
+    hypervisor:
+      - not kvm
+      - not none
+  - platform: firecracker
+    rootfs: 9pfs
 tools:
   compiler:
     - system
-    - first:
-        arch: x86_64
-        type: gcc
-        path: ~/bin/gcc
-    - second:
-        arch: x86_64
-        type: clang
-        path: ~/bin/clang
+    - arch: x86_64
+      type: gcc
+      path: ~/bin/gcc
+    - arch: x86_64
+      type: clang
+      path: ~/bin/clang
   vmm:
     - system
-    - first:
-        arch: x86_64
-        type: qemu
-        path: ~/bin/qemu
-    - second:
-        arch: arm64
-        type: firecracker
-        path: ~/bin/firecracker
+    - arch: x86_64
+      type: qemu
+      path: ~/bin/qemu
+    - arch: arm64
+      type: firecracker
+      path: ~/bin/firecracker
 source:
-  - base:
-      path: /home/razvan/unikraft/maintainers-tools/workdir
+  base: /home/razvan/unikraft/maintainers-tools/workdir

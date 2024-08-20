@@ -8,66 +8,187 @@ import shutil
 import sys
 
 class TesterConfig:
-    """Store tester configuration.
+    """Interact with tester configuration.
 
     Configuration is read from the global tester configuration file.
+    Extract valid configurations from tester configuration file.
+
+    Provide configurations for target definition: get_target_configs()
     """
 
     def __init__(self, config_file):
         try:
             with open(config_file, "r", encoding="utf8") as stream:
                 self.config = yaml.safe_load(stream)
+                self.variants = self._generate_variants()
         except IOError:
             print(f"Error: Unable to open configuration file '{config_file}'", file=sys.stderr)
             return None
 
-    def generate_variants(self):
-        variants = self.config['variants']
-        return (dict(zip(variants.keys(), values)) for values in itertools.product(*variants.values()))
+    def _generate_full_variants(self):
+        """Generate all possible configuration variants.
 
-    def generate_compilers(self, plat, arch, system_comp):
+        Create all combinations of values from the 'variants' dictionary in
+        the tester configuration file.
+
+        Each variant is a dictionary, e.g.
+        {'arch': 'x86_64', 'hypervisor': 'kvm', 'platform': 'qemu', ...}
+
+        Return a list of all variants.
+        """
+
+        variants = self.config['variants']
+        return list(dict(zip(variants.keys(), values)) for values in itertools.product(*variants.values()))
+
+    def _get_exclude_variants(self):
+        """Get variants to be excluded from all possible variants.
+
+        Parse values in the 'exclude_variants' list in the tester
+        configuration file.
+
+        Each exclude variant is a dictionary with various keys, e.g:
+        {'networking': 'brigde', 'platform': 'firecracker'}
+        """
+
+        variants = self.config['variants']
+        exclude_variants = self.config['exclude_variants']
+        ret = []
+
+        for e in exclude_variants:
+            tmp_dict = {}
+            for k1, v1 in e.items():
+                if isinstance(v1, list):
+                    l = list(variants[k1])
+                    for v2 in v1:
+                        if v2.startswith("not"):
+                            tmp_l = list(set(variants[k1]) - set([v2.split(" ")[1]]))
+                        else:
+                            tmp_l = [v2]
+                        l = set.intersection(set(l), set(tmp_l))
+                    tmp_dict[k1] = l
+                else:
+                    if v1.startswith("not"):
+                        l = list(set(variants[k1]) - set([v1.split(" ")[1]]))
+                    else:
+                        l = [v1]
+                    tmp_dict[k1] = l
+            ret.extend(list(dict(zip(tmp_dict, x)) for x in itertools.product(*tmp_dict.values())))
+
+        return ret
+
+    def _generate_variants(self):
+        """Generate valid variants.
+
+        Valid variants are those that are not excluded. In short, do a diff
+        between all variants (with _generate_full_variants()) and the excluded
+        variants (with _get_exlude_variants()).
+
+        An exclude variant is a dictionary. A variant is a dictionary. If all
+        items in the exclude variant ar part of the variant, that variant is
+        not used.
+
+        Return list of variants, i.e. a sublist of the full variants.
+        """
+
+        exclude_variants = self._get_exclude_variants()
+        full_variants = self._generate_full_variants()
+        ret_variants = []
+
+        for f in full_variants:
+            excluded = True
+            for e in exclude_variants:
+                for k, v in e.items():
+                    if f[k] != v:
+                        excluded = False
+                        break
+                if excluded:
+                    break
+            if not excluded:
+                ret_variants.append(f)
+
+        return ret_variants
+
+    def _generate_compilers(self, plat, arch, system_comp):
+        """Generate compiler configurations.
+
+        Generate compiler configurations using system compiler configuration
+        and tester configuration for the specific architecture. The platform
+        is also passed as argument for potential future use.
+
+        Return list of compiler configurations. Each item in the list is
+        a dictionary, e.g.:
+        {'type': 'gcc', 'path': '/usr/bin/gcc'}
+        """
+
         compilers = []
+
         for c in self.config['tools']['compiler']:
-            if c.key == "system":
-                compilers.append(system_comp)
+            if isinstance(c, dict):
+                if c['arch'] == arch:
+                    compilers.append({
+                        "type": c['type'],
+                        "path": c['path']
+                        })
                 continue
-            if c['arch'] == arch:
-                compilers.append({
-                    "type": c['type'],
-                    "path": c['path']
-                    })
+            if c == "system":
+                compilers.append(system_comp)
+
         return compilers
 
-    def generate_vmms(self, plat, arch, system_vmm):
+    def _generate_vmms(self, plat, arch, system_vmm):
+        """Generate VMM configurations.
+
+        Generate VMM configurations using system VMM configuration and tester
+        configuration for the specific platform and architecture.
+
+        Return list of compiler configurations. Each item in the list is
+        a dictionary, e.g.:
+        {'platform': 'qemu', 'path': '/usr/bin/qemu-system-x86_64'}
+        """
+
         vmms = []
+
         for v in self.config['tools']['vmm']:
-            if v.key == "system":
-                vmms.append(system_comp)
+            if isinstance(v, dict):
+                if v['arch'] == arch and v['type'] == plat:
+                    vmms.append({
+                        "platform": v['type'],
+                        "path": v['path']
+                        })
                 continue
-            if v['arch'] == arch and v['type'] == plat:
-                vmms.append({
-                    "platform": v['type'],
-                    "path": v['path']
-                    })
+            if v == "system":
+                vmms.append(system_vmm)
+
         return vmms
 
+    def get_target_configs(self, plat, arch, vmm, comp, build_tool, run_tool):
+        """Get configurations for target.
 
-    def get_valid_configs(plat, arch, vmm, comp, build_tool, run_tool):
-        valid_configs = []
-        for v in self.generate_variants():
+        The target is defined by the platform, architecture, system VMMs,
+        system compiler, build tools and run tools. Do an intersection between
+        the valid_variants list and the target specification.
+
+        Return list of target configurations. Each item in the list is a
+        dictionary, e.g.:
+        {'arch': 'x86_64', ..., 'base': '...', 'compiler': '...' }'
+        """
+
+        target_configs = []
+
+        for v in self.variants:
             if plat == v['platform'] and \
                     arch == v['arch'] and \
                     build_tool == v['build_tool'] and \
                     run_tool == v['run_tool']:
                 _config = v
-                _config.update['base'] = self.config['source']['base']
-                for _comp in self.generate_compilers(self, comp):
-                    _config.update['compiler'] = _comp
-                    for _vmm in self.generate_vmms(self, vmm):
-                        _config.update['vmm'] = _vmm
-                        valid_configs.append(_config)
+                _config['base'] = self.config['source']['base']
+                for _comp in self._generate_compilers(plat, arch, comp):
+                    _config['compiler'] = _comp
+                    for _vmm in self._generate_vmms(plat, arch, vmm):
+                        _config['vmm'] = _vmm
+                        target_configs.append(_config)
 
-        return valid_configs
+        return target_configs
 
     def __str__(self):
         return str(self.config)
@@ -85,6 +206,11 @@ class SystemConfig:
     """
 
     def _get_os(self):
+        """Get operating system information.
+
+        Store in the self.of dictionary.
+        """
+
         info = platform.uname()
         self.os = {
                 "type": info.system,
@@ -95,9 +221,19 @@ class SystemConfig:
             self.os["distro"] = platform.freedesktop_os_release()["ID"]
 
     def _get_arch(self):
+        """Get machine architecture information.
+
+        Store in the self.arch string.
+        """
+
         self.arch = platform.machine()
 
     def _get_hypervisor(self):
+        """Get hypervisor information.
+
+        Store in the self.hypervisor string.
+        """
+
         self.hypervisor = ""
         if self.os["type"] == "Linux":
             with subprocess.Popen("lsmod", stdout=subprocess.PIPE) as proc:
@@ -106,6 +242,18 @@ class SystemConfig:
                     self.hypervisor = "kvm"
 
     def _get_paths(self, string, pattern):
+        """Get full paths for string (part of a command).
+
+        Use Bash completion to expand string to a full command. Match result
+        against pattern. Only select results that match.
+        Use `which` to get the absolute path for the full command.
+
+        Return list of full paths.
+
+        TODO: This has only been tested on Bash.
+        Test on other shells.
+        """
+
         cmds = []
         with subprocess.Popen(["bash", "-c", f"compgen -A command {string}"], stdout=subprocess.PIPE) as proc:
             for l in proc.stdout.readlines():
@@ -122,6 +270,11 @@ class SystemConfig:
         return paths
 
     def _get_vmms(self):
+        """Get VMMs information.
+
+        Store in the self.vmms dictionary.
+        """
+
         qemu_x86_64_paths = self._get_paths("qemu-system-", "^qemu-system-x86_64$")
         firecracker_x86_64_paths = self._get_paths("qemu-system-", "^qemu-system-aarch64")
         qemu_arm64_paths = self._get_paths("firecracker-", "^firecracker-x86_64")
@@ -138,6 +291,11 @@ class SystemConfig:
                 }
 
     def _get_compilers(self):
+        """Get compilers information.
+
+        Store in the self.compilers dictionary.
+        """
+
         gcc_x86_64_paths = self._get_paths("gcc-", "^gcc-[0-9]+$")
         gcc_arm64_paths = self._get_paths("aarch64-linux-gnu-gcc-", "aarch64-linux-gnu-gcc-[0-9]+$")
         clang_paths = self._get_paths("clang-", "^clang-[0-9]+$")
@@ -152,7 +310,43 @@ class SystemConfig:
                     }
                 }
 
+    def get_vmms(self, plat, arch):
+        """Get available VMMs for platform and architecture.
+
+        Return list of dictionaries of available VMMs.
+        """
+
+        ret_list = []
+        for v in self.vmms[arch][plat]:
+            ret_list.append({
+                "type": plat,
+                "path": v
+                })
+        return ret_list
+
+    def get_compilers(self, plat, arch):
+        """Get available compilers for platform and architecture.
+
+        The platform is not used; it is passed as a parameter for future use.
+
+        Return list of dictionaries of available compilers.
+        """
+
+        ret_list = []
+        for k, v in self.compilers[arch].items():
+            ret_list.append({
+                "type": k,
+                "path": v
+                })
+        return ret_list
+
     def __init__(self):
+        """Initialize object.
+
+        Extract all system information: operating system, architecture,
+        hypervisor, VMMs, compilers.
+        """
+
         self._get_os()
         self._get_arch()
         self._get_hypervisor()
@@ -200,6 +394,16 @@ class AppConfig:
 
     def is_bincompat(self):
         return self.has_template(self)
+
+    def get_targets(self):
+        targets = []
+        for t in self.app_config['targets']:
+            plat = t.split("/")[0]
+            arch = t.split("/")[1]
+            if plat == "fc":
+                plat = "firecracker"
+            targets.append((plat, arch))
+        return targets
 
     def _parse_user_config(self, user_config_file):
         with open(user_config_file, "r", encoding="utf-8") as stream:
@@ -255,6 +459,9 @@ class BuildConfig:
     def __init__(self):
         pass
 
+    def get_build_tools(plat, arch):
+        return ["make", "kraft"]
+
     def generate(self):
         # Generate build.sh script.
         # Optionally, generate defconfig file.
@@ -276,6 +483,9 @@ class RunConfig:
     def __init__(self):
         pass
 
+    def get_run_tools(plat, arch):
+        return ["vmm", "kraft"]
+
     def generate(self):
         # Generate run.sh script.
         pass
@@ -288,11 +498,12 @@ class TestRunner:
 def generate_target_configs(tester_config, app_config, system_config):
     for (plat, arch) in app_config.get_targets():
         for vmm in system_config.get_vmms(plat, arch):
-            for comp in system_config.get_comps(arch):
+            for comp in system_config.get_compilers(plat, arch):
                 for build_tool in BuildConfig.get_build_tools(plat, arch):
                     for run_tool in RunConfig.get_run_tools(plat, arch):
-                        for config in tester_config.get_valid_configs(plat, arch, vmm, comp, build_tool, run_tool):
-                            t = TargetConfig(config, app_config, system_config)
+                        for config in tester_config.get_target_configs(plat, arch, vmm, comp, build_tool, run_tool):
+                            print(config)
+                            #t = TargetConfig(config, app_config, system_config)
 
 
 t = TesterConfig("../../../utils/new-design/tester.yaml")
@@ -302,6 +513,7 @@ print(a)
 s = SystemConfig()
 print(s)
 
-#targets = generate_target_configs(t, a, s)
+targets = generate_target_configs(t, a, s)
+#print(targets)
 #for t in targets:
 #    t.generate()
