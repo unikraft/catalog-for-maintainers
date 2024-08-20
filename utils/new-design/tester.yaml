@@ -20,8 +20,8 @@ variants:
     - multiboot
     - uefi
   pie:
-    - true
-    - false
+    - on
+    - off
   debug:
     - none
     - strace
@@ -53,22 +53,29 @@ exclude_variants:
       - not none
   - platform: firecracker
     rootfs: 9pfs
+  - bootloader: uefi
+  - debug:
+      - info
+      - err
+      - debug
+  - pie: on
+  - platform: xen
 tools:
   compiler:
     - system
-    - arch: x86_64
-      type: gcc
-      path: ~/bin/gcc
-    - arch: x86_64
-      type: clang
-      path: ~/bin/clang
+    #- arch: x86_64
+    #  type: gcc
+    #  path: ~/bin/gcc
+    #- arch: x86_64
+    #  type: clang
+    #  path: ~/bin/clang
   vmm:
     - system
-    - arch: x86_64
-      type: qemu
-      path: ~/bin/qemu
-    - arch: arm64
-      type: firecracker
-      path: ~/bin/firecracker
+    #- arch: x86_64
+    #  type: qemu
+    #  path: ~/bin/qemu
+    #- arch: arm64
+    #  type: firecracker
+    #  path: ~/bin/firecracker
 source:
   base: /home/razvan/unikraft/maintainers-tools/workdir

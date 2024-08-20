@@ -66,11 +66,14 @@ class TesterConfig:
                             tmp_l = [v2]
                         l = set.intersection(set(l), set(tmp_l))
                     tmp_dict[k1] = l
-                else:
+                elif isinstance(v1, str):
                     if v1.startswith("not"):
                         l = list(set(variants[k1]) - set([v1.split(" ")[1]]))
                     else:
                         l = [v1]
+                    tmp_dict[k1] = l
+                else:
+                    l = [v1]
                     tmp_dict[k1] = l
             ret.extend(list(dict(zip(tmp_dict, x)) for x in itertools.product(*tmp_dict.values())))
 
@@ -97,6 +100,7 @@ class TesterConfig:
         for f in full_variants:
             excluded = True
             for e in exclude_variants:
+                excluded = True
                 for k, v in e.items():
                     if f[k] != v:
                         excluded = False
@@ -104,7 +108,7 @@ class TesterConfig:
                 if excluded:
                     break
             if not excluded:
-                ret_variants.append(f)
+                 ret_variants.append(f)
 
         return ret_variants
 
@@ -276,8 +280,8 @@ class SystemConfig:
         """
 
         qemu_x86_64_paths = self._get_paths("qemu-system-", "^qemu-system-x86_64$")
-        firecracker_x86_64_paths = self._get_paths("qemu-system-", "^qemu-system-aarch64")
-        qemu_arm64_paths = self._get_paths("firecracker-", "^firecracker-x86_64")
+        qemu_arm64_paths = self._get_paths("qemu-system-", "^qemu-system-aarch64")
+        firecracker_x86_64_paths = self._get_paths("firecracker-", "^firecracker-x86_64")
         firecracker_arm64_paths = self._get_paths("firecracker-", "^firecracker-aarch64")
         self.vmms = {
                 'arm64': {
@@ -334,10 +338,11 @@ class SystemConfig:
 
         ret_list = []
         for k, v in self.compilers[arch].items():
-            ret_list.append({
-                "type": k,
-                "path": v
-                })
+            for l in v:
+                ret_list.append({
+                    "type": k,
+                    "path": l
+                    })
         return ret_list
 
     def __init__(self):
@@ -384,6 +389,9 @@ class AppConfig:
             return True
         return False
 
+    def has_einitrd(self):
+        return self.einitrd
+
     def is_runtime(self):
         if "unikraft" in self.app_config.keys():
             return True
@@ -395,30 +403,65 @@ class AppConfig:
     def is_bincompat(self):
         return self.has_template(self)
 
-    def get_targets(self):
-        targets = []
-        for t in self.app_config['targets']:
-            plat = t.split("/")[0]
-            arch = t.split("/")[1]
-            if plat == "fc":
-                plat = "firecracker"
-            targets.append((plat, arch))
-        return targets
-
     def _parse_user_config(self, user_config_file):
         with open(user_config_file, "r", encoding="utf-8") as stream:
             self.user_config = yaml.safe_load(stream)
 
     def _parse_app_config(self, app_config_file):
         with open(app_config_file, "r", encoding="utf-8") as stream:
-            self.app_config = yaml.safe_load(stream)
+            data = yaml.safe_load(stream)
+        self.config = {}
+
+        self.config["kconfig"] = {}
+        if isinstance(data["unikraft"], dict):
+            if "kconfig" in data["unikraft"].keys():
+                self.config["kconfig"] = data["unikraft"]["kconfig"]
+
+        if not "name" in data.keys():
+            self.config["name"] = os.path.basename(os.getcwd())
+        self.config["name"] = data["name"]
+
+        self.einitrd = False
+        if "CONFIG_LIBVFSCORE_AUTOMOUNT_CI_EINITRD" in self.config["kconfig"].keys() and \
+                self.config["kconfig"]["CONFIG_LIBVFSCORE_AUTOMOUNT_CI_EINITRD"] == "y":
+            self.einitrd = True
+            self.config["kconfig"].pop("CONFIG_LIBVFSCORE_AUTOMOUNT_CI_EINITRD")
+            self.config["kconfig"].pop("CONFIG_LIBVFSCORE_AUTOMOUNT_CI")
+
+        targets = []
+        for t in data['targets']:
+            plat = t.split("/")[0]
+            arch = t.split("/")[1]
+            if plat == "fc":
+                plat = "firecracker"
+            targets.append((plat, arch))
+        self.config['targets'] = targets
+
+        if not "cmd" in data.keys():
+            self.config['cmd'] = None
+        else:
+            self.config["cmd"] = " ".join(c for c in data["cmd"])
+
+        if not "rootfs" in data.keys():
+            self.config['rootfs'] = None
+        else:
+            self.config["rootfs"] = data["rootfs"]
+
+        if not "libraries" in data.keys():
+            self.config["libs"] = None
+        else:
+            self.config["libs"] = list(data["libraries"].keys())
+            for l in self.config["libs"]:
+                if isinstance(data["libraries"][l], dict):
+                    if "kconfig" in data["libraries"][l].keys():
+                        self.config["kconfig"].update(data["libraries"][l]["kconfig"])
 
     def __init__(self, app_config="Kraftfile", user_config="config.yaml"):
         self._parse_user_config(user_config)
         self._parse_app_config(app_config)
 
     def __str__(self):
-        return str(self.app_config) + "\n" + str(self.user_config)
+        return str(self.config) + "\n" + str(self.user_config)
 
 
 class TargetConfig:
@@ -434,16 +477,28 @@ class TargetConfig:
     debug = DEBUG_NONE
     compiler = None
     embedded_initrd = False
+    class_id = 1
 
-    def __init__(self):
-        pass
+    def __init__(self, config, app_config, system_config):
+        self.config = config
+        self.id = TargetConfig.class_id
+        TargetConfig.class_id += 1
+        if 'test_dir' in app_config.user_config.keys():
+            base = app_config.user_config['test_dir']
+        else:
+            base = '.tests'
+        self.dir = os.path.join(base, "{:05d}".format(self.id))
+        self.build_config = BuildConfig(self.dir, self.config, app_config)
+        self.run_config = RunConfig(self.dir, self.config, app_config)
 
     def generate(self):
         # Create directory.
+        os.mkdir(self.dir, mode=0o755)
         # Generate config.yaml.
+        with open(os.path.join(self.dir, 'config.yaml'), 'w') as outfile:
+            yaml.dump(self.config, outfile, default_flow_style=False)
         self.build_config.generate()
         self.run_config.generate()
-        pass
 
 
 class BuildConfig:
@@ -456,16 +511,50 @@ class BuildConfig:
     build_dir = None
     artifacts_dir = None
 
-    def __init__(self):
-        pass
+    def __init__(self, base_dir, config, app_config):
+        self.dir = base_dir
+        self.config = config
+        self.app_config = app_config
 
     def get_build_tools(plat, arch):
         return ["make", "kraft"]
 
+    def _generate_defconfig(self):
+        """Generate default configuration files for Make-based builds."""
+
+        with open(os.path.join(self.dir, "defconfig"), "w", encoding="utf-8") as stream:
+            stream.write(f"CONFIG_UK_NAME=\"{self.app_config.config['name']}\"\n")
+            stream.write(f"CONFIG_UK_DEFNAME=\"{self.app_config.config['name']}\"\n")
+            if self.app_config.has_einitrd():
+                stream.write("CONFIG_LIBVFSCORE_AUTOMOUNT_CI_EINITRD=y\n")
+                stream.write("CONFIG_LIBVFSCORE_AUTOMOUNT_CI=y\n")
+            else:
+                stream.write("CONFIG_LIBVFSCORE_AUTOMOUNT_CI_EINITRD=n\n")
+                stream.write("CONFIG_LIBVFSCORE_AUTOMOUNT_CI=n\n")
+            if self.config['platform'] == 'qemu':
+                stream.write("CONFIG_PLAT_KVM=y\n")
+                stream.write("CONFIG_KVM_VMM_QEMU=y\n")
+            if self.config['platform'] == 'firecracker':
+                stream.write("CONFIG_PLAT_KVM=y\n")
+                stream.write("CONFIG_KVM_VMM_FIRECRACKER=y\n")
+            if self.config['arch'] == 'arm64':
+                stream.write("CONFIG_ARCH_ARM_64=y\n")
+            if self.config['arch'] == 'x86_64':
+                stream.write("CONFIG_ARCH_X86_64=y\n")
+            if 'libs' in self.app_config.config.keys():
+                for l in self.app_config.config["libs"]:
+                    if l.startswith("lib"):
+                        stream.write("CONFIG_{}=y\n".format(l.replace('-', '_').upper()))
+                    else:
+                        stream.write("CONFIG_LIB{}=y\n".format(l.replace('-', '_').upper()))
+            for k, v in self.app_config.config["kconfig"].items():
+                stream.write(f"{k}={v}\n")
+
     def generate(self):
         # Generate build.sh script.
         # Optionally, generate defconfig file.
-        pass
+        if self.config['build_tool'] == 'make':
+            self._generate_defconfig()
 
 
 class RunConfig:
@@ -480,8 +569,10 @@ class RunConfig:
     fs_type = FS_TYPE_NONE
     run_script = None
 
-    def __init__(self):
-        pass
+    def __init__(self, base_dir, config, app_config):
+        self.dir = base_dir
+        self.config = config
+        self.app_config = app_config
 
     def get_run_tools(plat, arch):
         return ["vmm", "kraft"]
@@ -496,24 +587,22 @@ class TestRunner:
 
 
 def generate_target_configs(tester_config, app_config, system_config):
-    for (plat, arch) in app_config.get_targets():
+    targets = []
+    for (plat, arch) in app_config.config['targets']:
         for vmm in system_config.get_vmms(plat, arch):
             for comp in system_config.get_compilers(plat, arch):
                 for build_tool in BuildConfig.get_build_tools(plat, arch):
                     for run_tool in RunConfig.get_run_tools(plat, arch):
                         for config in tester_config.get_target_configs(plat, arch, vmm, comp, build_tool, run_tool):
-                            print(config)
-                            #t = TargetConfig(config, app_config, system_config)
+                            t = TargetConfig(config, app_config, system_config)
+                            targets.append(t)
+    return targets
 
 
 t = TesterConfig("../../../utils/new-design/tester.yaml")
-print(t)
 a = AppConfig()
-print(a)
 s = SystemConfig()
-print(s)
 
 targets = generate_target_configs(t, a, s)
-#print(targets)
-#for t in targets:
-#    t.generate()
+for t in targets:
+    t.generate()
