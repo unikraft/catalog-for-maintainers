@@ -496,22 +496,10 @@ class AppConfig:
         self._parse_app_config(app_config)
 
     def __str__(self):
-        return str(self.config) + "\n" + str(self.user_config)
+        return str(self.config)
 
 
 class TargetConfig:
-    PLATFORM_NONE = None
-    ARCH_NONE = None
-    BOOTLOADER_TYPE_NONE = None
-    DEBUG_NONE = None
-    platform = PLATFORM_NONE
-    arch = ARCH_NONE
-    pie_enabled = False
-    paging_enabled = False
-    bootloader = BOOTLOADER_TYPE_NONE
-    debug = DEBUG_NONE
-    compiler = None
-    embedded_initrd = False
     class_id = 1
 
     def __init__(self, config, app_config, system_config):
@@ -537,14 +525,6 @@ class TargetConfig:
 
 
 class BuildConfig:
-    BUILD_TOOL_NONE = None
-    build_tool = {
-            'type': BUILD_TOOL_NONE,
-            'recipe': None
-            }
-    build_script = None
-    build_dir = None
-    artifacts_dir = None
 
     def __init__(self, base_dir, target_config, app_config):
         self.dir = base_dir
@@ -629,7 +609,11 @@ class BuildConfig:
                 stream.write(f"runtime: {self.app_config.config['runtime']}\n\n")
 
             if self.app_config.config['rootfs']:
-                stream.write(f"rootfs: {self.app_config.config['rootfs']}\n\n")
+                if os.path.basename(self.app_config.config['rootfs']) == "Dockerfile":
+                    rootfs = os.path.join(os.getcwd(), self.app_config.config["rootfs"])
+                else:
+                    rootfs = os.path.join(self.dir, "rootfs")
+                stream.write(f"rootfs: {rootfs}\n\n")
 
             if self.app_config.config['cmd']:
                 stream.write(f"cmd: \"{self.app_config.config['cmd']}\"\n\n")
@@ -655,8 +639,8 @@ class BuildConfig:
                     if self.app_config.has_einitrd():
                         stream.write("    CONFIG_LIBVFSCORE_AUTOMOUNT_CI_EINITRD: 'y'\n")
                         stream.write("    CONFIG_LIBVFSCORE_AUTOMOUNT_CI: 'y'\n")
-                        einitrd_cpio_path = os.path.join(self.dir, "initrd.cpio")
-                        stream.write(f"    CONFIG_LIBVFSCORE_AUTOMOUNT_EINITRD_PATH: '{einitrd_cpio_path}'\n")
+                        #einitrd_cpio_path = os.path.join(self.dir, "initrd.cpio")
+                        #stream.write(f"    CONFIG_LIBVFSCORE_AUTOMOUNT_EINITRD_PATH: '{einitrd_cpio_path}'\n")
                     else:
                         stream.write("    CONFIG_LIBVFSCORE_AUTOMOUNT_CI_EINITRD: 'n'\n")
                         stream.write("    CONFIG_LIBVFSCORE_AUTOMOUNT_CI: 'n'\n")
@@ -763,17 +747,8 @@ class BuildConfig:
             self._generate_kraftfile()
             self._generate_build_kraft()
 
+
 class RunConfig:
-    NET_TYPE_NONE = None
-    RUN_TOOL_NONE = None
-    FS_TYPE_NONE = None
-    net_type = NET_TYPE_NONE
-    run_tool = {
-            'type': RUN_TOOL_NONE,
-            'config': None
-            }
-    fs_type = FS_TYPE_NONE
-    run_script = None
 
     def __init__(self, base_dir, target_config, app_config):
         self.dir = base_dir

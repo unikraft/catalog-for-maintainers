@@ -9,7 +9,7 @@ variants:
   platform:
     - xen
     - qemu
-    - firecracker
+    - fc
   build_tool:
     - make
     - kraft
@@ -38,12 +38,12 @@ variants:
     - tap
 exclude_variants:
   - networking: bridge
-    platform: firecracker
+    platform: fc
   - networking: tap
-    platform: not firecracker
+    platform: not fc
   - bootloader: uefi
     arch: not x86_64
-  - platform: firecracker
+  - platform: fc
     hypervisor: not kvm
   - platform: xen
     hypervisor: not xen
@@ -51,7 +51,7 @@ exclude_variants:
     hypervisor:
       - not kvm
       - not none
-  - platform: firecracker
+  - platform: fc
     rootfs: 9pfs
   - bootloader: uefi
   - debug:
@@ -75,7 +75,7 @@ tools:
     #  type: qemu
     #  path: ~/bin/qemu
     #- arch: arm64
-    #  type: firecracker
-    #  path: ~/bin/firecracker
+    #  type: fc
+    #  path: ~/bin/fc
 source:
-  base: /home/razvan/unikraft/maintainers-tools/workdir
+  base: /home/razvan/orgs/unikraft/maintainer-tools/workdir
