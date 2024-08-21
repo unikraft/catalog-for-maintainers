@@ -6,6 +6,9 @@ import subprocess
 import re
 import shutil
 import sys
+import string
+
+SCRIPT_DIR = "."
 
 class TesterConfig:
     """Interact with tester configuration.
@@ -391,13 +394,16 @@ class AppConfig:
         return self.einitrd
 
     def is_runtime(self):
+        return self.is_kernel()
+
+    def is_kernel(self):
         return bool(self.config['unikraft'])
 
     def is_example(self):
         return not self.is_runtime()
 
     def is_bincompat(self):
-        return self.has_template(self)
+        return self.has_template()
 
     def _parse_user_config(self, user_config_file):
         with open(user_config_file, "r", encoding="utf-8") as stream:
@@ -515,9 +521,9 @@ class TargetConfig:
         self.id = TargetConfig.class_id
         TargetConfig.class_id += 1
         if app_config.config['test_dir']:
-            base = app_config.user_config['test_dir']
+            base = os.path.abspath(app_config.user_config['test_dir'])
         else:
-            base = '.tests'
+            base = os.path.abspath('.tests')
         self.dir = os.path.join(base, "{:05d}".format(self.id))
         self.build_config = BuildConfig(self.dir, self.config, app_config)
         self.run_config = RunConfig(self.dir, self.config, app_config)
@@ -551,7 +557,7 @@ class BuildConfig:
         return ["make", "kraft"]
 
     def _generate_defconfig(self):
-        """Generate default configuration files for Make-based builds."""
+        """Generate default configuration file for Make-based build."""
 
         with open(os.path.join(self.dir, "defconfig"), "w", encoding="utf-8") as stream:
             stream.write(f"CONFIG_UK_NAME=\"{self.app_config.config['name']}\"\n")
@@ -583,6 +589,29 @@ class BuildConfig:
                         stream.write("CONFIG_LIB{}=y\n".format(l.replace('-', '_').upper()))
                     for k, v in self.app_config.config["libraries"][l]["kconfig"].items():
                         stream.write(f"{k}={v}\n")
+
+    def _generate_makefile(self):
+        """Generate Makefile for Make-based build."""
+
+        with open(os.path.join(SCRIPT_DIR, "tpl_Makefile"), "r", encoding="utf-8") as stream:
+            raw_content = stream.read()
+
+        if self.app_config.has_template():
+            app_dir = os.path.join(os.path.join(self.target_config["base"], "apps"), self.app_config.config['template'])
+        else:
+            app_dir="$(PWD)"
+        libs = ""
+        if 'libraries' in self.app_config.config.keys():
+            for l in self.app_config.config["libraries"].keys():
+                libs += f"$(LIBS_BASE)/{l}:"
+            libs = libs[:-1]
+        base = self.target_config["base"]
+        target_dir = self.dir
+
+        content = raw_content.format(**locals())
+
+        with open(os.path.join(self.dir, "Makefile"), "w", encoding="utf-8") as stream:
+            stream.write(content)
 
     def _generate_kraftfile(self):
         """Generate Kraftfile for Kraft-based build.
@@ -650,6 +679,8 @@ class BuildConfig:
         # Optionally, generate defconfig file.
         if self.target_config['build_tool'] == 'make':
             self._generate_defconfig()
+            if self.app_config.is_kernel():
+                self._generate_makefile()
         elif self.target_config['build_tool'] == 'kraft':
             self._generate_kraftfile()
 
@@ -695,6 +726,7 @@ def generate_target_configs(tester_config, app_config, system_config):
                             targets.append(t)
     return targets
 
+SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 
 t = TesterConfig("../../../utils/new-design/tester.yaml")
 a = AppConfig()
