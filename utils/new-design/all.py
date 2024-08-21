@@ -385,17 +385,13 @@ class AppConfig:
     """
 
     def has_template(self):
-        if "template" in self.app_config.keys():
-            return True
-        return False
+        return self.config['template'] != None
 
     def has_einitrd(self):
         return self.einitrd
 
     def is_runtime(self):
-        if "unikraft" in self.app_config.keys():
-            return True
-        return False
+        return bool(self.config['unikraft'])
 
     def is_example(self):
         return not self.is_runtime()
@@ -405,37 +401,71 @@ class AppConfig:
 
     def _parse_user_config(self, user_config_file):
         with open(user_config_file, "r", encoding="utf-8") as stream:
-            self.user_config = yaml.safe_load(stream)
+            data = yaml.safe_load(stream)
+
+        self.config["networking"] = False
+
+        if not "networking" in data.keys():
+            self.config["networking"] = False
+        else:
+            self.config["networking"] = data["networking"]
+
+        if not "test_dir" in data.keys():
+            self.config["test_dir"] = None
+        else:
+            self.config["test_dir"] = data["test_dir"]
+
+        if not "memory" in data.keys():
+            print(f"Error: 'memory' attribute is not defined in {user_config_file}'", file=sys.stderr)
+            sys.exit(1)
+        else:
+            self.config["memory"] = data["memory"]
 
     def _parse_app_config(self, app_config_file):
         with open(app_config_file, "r", encoding="utf-8") as stream:
             data = yaml.safe_load(stream)
-        self.config = {}
 
-        self.config["kconfig"] = {}
-        if isinstance(data["unikraft"], dict):
-            if "kconfig" in data["unikraft"].keys():
-                self.config["kconfig"] = data["unikraft"]["kconfig"]
+        self.config["unikraft"] = {}
+        if "unikraft" in data.keys():
+            if isinstance(data["unikraft"], dict):
+                if "kconfig" in data["unikraft"].keys():
+                    self.config["unikraft"]["kconfig"] = data["unikraft"]["kconfig"]
+                    self.einitrd = False
+                    if "CONFIG_LIBVFSCORE_AUTOMOUNT_CI_EINITRD" in self.config["unikraft"]["kconfig"].keys() and \
+                            self.config["unikraft"]["kconfig"]["CONFIG_LIBVFSCORE_AUTOMOUNT_CI_EINITRD"] == "y":
+                        self.einitrd = True
+                        self.config["unikraft"]["kconfig"].pop("CONFIG_LIBVFSCORE_AUTOMOUNT_CI_EINITRD")
+                        self.config["unikraft"]["kconfig"].pop("CONFIG_LIBVFSCORE_AUTOMOUNT_CI")
+
+
+        if not "template" in data.keys():
+            self.config["template"] = None
+        else:
+            self.config["template"] = self.data["template"].split("/")[-1]
+            if self.config["template"].endswith(".git"):
+                self.config["template"] = self.config["template"][:-4]
 
         if not "name" in data.keys():
             self.config["name"] = os.path.basename(os.getcwd())
-        self.config["name"] = data["name"]
+        else:
+            self.config["name"] = data["name"]
 
-        self.einitrd = False
-        if "CONFIG_LIBVFSCORE_AUTOMOUNT_CI_EINITRD" in self.config["kconfig"].keys() and \
-                self.config["kconfig"]["CONFIG_LIBVFSCORE_AUTOMOUNT_CI_EINITRD"] == "y":
-            self.einitrd = True
-            self.config["kconfig"].pop("CONFIG_LIBVFSCORE_AUTOMOUNT_CI_EINITRD")
-            self.config["kconfig"].pop("CONFIG_LIBVFSCORE_AUTOMOUNT_CI")
+        if not "runtime" in data.keys():
+            self.config["runtime"] = None
+        else:
+            self.config["runtime"] = data["runtime"]
 
-        targets = []
-        for t in data['targets']:
-            plat = t.split("/")[0]
-            arch = t.split("/")[1]
-            if plat == "fc":
-                plat = "firecracker"
-            targets.append((plat, arch))
-        self.config['targets'] = targets
+        if not 'targets' in data.keys():
+            self.config['targets'] = None
+        else:
+            targets = []
+            for t in data['targets']:
+                plat = t.split("/")[0]
+                arch = t.split("/")[1]
+                if plat == "fc":
+                    plat = "firecracker"
+                targets.append((plat, arch))
+            self.config['targets'] = targets
 
         if not "cmd" in data.keys():
             self.config['cmd'] = None
@@ -447,16 +477,17 @@ class AppConfig:
         else:
             self.config["rootfs"] = data["rootfs"]
 
-        if not "libraries" in data.keys():
-            self.config["libs"] = None
-        else:
-            self.config["libs"] = list(data["libraries"].keys())
-            for l in self.config["libs"]:
+        self.config["libraries"] = {}
+        if "libraries" in data.keys():
+            for l in data["libraries"].keys():
+                self.config["libraries"][l] = {}
+                self.config["libraries"][l]["kconfig"] = {}
                 if isinstance(data["libraries"][l], dict):
                     if "kconfig" in data["libraries"][l].keys():
-                        self.config["kconfig"].update(data["libraries"][l]["kconfig"])
+                        self.config["libraries"][l]["kconfig"] = data["libraries"][l]["kconfig"]
 
     def __init__(self, app_config="Kraftfile", user_config="config.yaml"):
+        self.config = {}
         self._parse_user_config(user_config)
         self._parse_app_config(app_config)
 
@@ -483,7 +514,7 @@ class TargetConfig:
         self.config = config
         self.id = TargetConfig.class_id
         TargetConfig.class_id += 1
-        if 'test_dir' in app_config.user_config.keys():
+        if app_config.config['test_dir']:
             base = app_config.user_config['test_dir']
         else:
             base = '.tests'
@@ -511,9 +542,9 @@ class BuildConfig:
     build_dir = None
     artifacts_dir = None
 
-    def __init__(self, base_dir, config, app_config):
+    def __init__(self, base_dir, target_config, app_config):
         self.dir = base_dir
-        self.config = config
+        self.target_config = target_config
         self.app_config = app_config
 
     def get_build_tools(plat, arch):
@@ -531,30 +562,96 @@ class BuildConfig:
             else:
                 stream.write("CONFIG_LIBVFSCORE_AUTOMOUNT_CI_EINITRD=n\n")
                 stream.write("CONFIG_LIBVFSCORE_AUTOMOUNT_CI=n\n")
-            if self.config['platform'] == 'qemu':
+            if self.target_config['platform'] == 'qemu':
                 stream.write("CONFIG_PLAT_KVM=y\n")
                 stream.write("CONFIG_KVM_VMM_QEMU=y\n")
-            if self.config['platform'] == 'firecracker':
+            if self.target_config['platform'] == 'firecracker':
                 stream.write("CONFIG_PLAT_KVM=y\n")
                 stream.write("CONFIG_KVM_VMM_FIRECRACKER=y\n")
-            if self.config['arch'] == 'arm64':
+            if self.target_config['arch'] == 'arm64':
                 stream.write("CONFIG_ARCH_ARM_64=y\n")
-            if self.config['arch'] == 'x86_64':
+            if self.target_config['arch'] == 'x86_64':
                 stream.write("CONFIG_ARCH_X86_64=y\n")
-            if 'libs' in self.app_config.config.keys():
-                for l in self.app_config.config["libs"]:
+            if self.app_config.config["unikraft"]:
+                for k, v in self.app_config.config["unikraft"]["kconfig"].items():
+                    stream.write(f"{k}={v}\n")
+            if 'libraries' in self.app_config.config.keys():
+                for l in self.app_config.config["libraries"].keys():
                     if l.startswith("lib"):
                         stream.write("CONFIG_{}=y\n".format(l.replace('-', '_').upper()))
                     else:
                         stream.write("CONFIG_LIB{}=y\n".format(l.replace('-', '_').upper()))
-            for k, v in self.app_config.config["kconfig"].items():
-                stream.write(f"{k}={v}\n")
+                    for k, v in self.app_config.config["libraries"][l]["kconfig"].items():
+                        stream.write(f"{k}={v}\n")
+
+    def _generate_kraftfile(self):
+        """Generate Kraftfile for Kraft-based build.
+
+        The generated Kraftfile is more-ore-less a copy of the initial Kraftfile.
+        Custom einitrd configuration, debug levels configuration is added.
+        """
+
+        with open(os.path.join(self.dir, "Kraftfile"), "w", encoding="utf-8") as stream:
+            stream.write("spec: v0.6\n\n")
+
+            stream.write(f"name: {self.app_config.config['name']}\n\n")
+
+            if self.app_config.config['runtime']:
+                stream.write(f"runtime: {self.app_config.config['runtime']}\n\n")
+
+            if self.app_config.config['rootfs']:
+                stream.write(f"rootfs: {self.app_config.config['rootfs']}\n\n")
+
+            if self.app_config.config['cmd']:
+                stream.write(f"cmd: \"{self.app_config.config['cmd']}\"\n\n")
+
+            if self.app_config.config['template']:
+                template_path = os.path.join(os.path.join(self.target_config["base"], "apps"), self.app_config.config['template'])
+                stream.write("template:\n")
+                stream.write(f"  source: {template_path}\n\n")
+
+            stream.write("targets:\n")
+            stream.write(f"- {self.target_config['platform']}/{self.target_config['arch']}\n\n")
+
+            if self.app_config.config['unikraft']:
+                unikraft_path = os.path.join(self.target_config["base"], "unikraft")
+                stream.write("unikraft:\n")
+                stream.write(f"  source: {unikraft_path}\n")
+                if self.app_config.config['unikraft']['kconfig']:
+                    stream.write("  kconfig:\n")
+                    for k,v in self.app_config.config['unikraft']['kconfig'].items():
+                        if isinstance(v, str):
+                            v = f"\"{v}\""
+                        stream.write(f"    {k}: {v}\n")
+                    if self.app_config.has_einitrd():
+                        stream.write("    CONFIG_LIBVFSCORE_AUTOMOUNT_CI_EINITRD: 'y'\n")
+                        stream.write("    CONFIG_LIBVFSCORE_AUTOMOUNT_CI: 'y'\n")
+                    else:
+                        stream.write("    CONFIG_LIBVFSCORE_AUTOMOUNT_CI_EINITRD: 'n'\n")
+                        stream.write("    CONFIG_LIBVFSCORE_AUTOMOUNT_CI: 'n'\n")
+                    stream.write("\n")
+                stream.write("\n")
+
+            if 'libraries' in self.app_config.config.keys():
+                stream.write("libraries:\n")
+                for l in self.app_config.config["libraries"].keys():
+                    lib_path = os.path.join(os.path.join(self.target_config["base"], "libs"), l)
+                    stream.write(f"  {l}:\n")
+                    stream.write(f"    source: {lib_path}\n")
+                    if self.app_config.config["libraries"][l]["kconfig"]:
+                        stream.write(f"    kconfig:\n")
+                        for k, v in self.app_config.config["libraries"][l]["kconfig"].items():
+                            if isinstance(v, str):
+                                v = f"\"{v}\""
+                            stream.write(f"      {k}: {v}\n")
 
     def generate(self):
         # Generate build.sh script.
         # Optionally, generate defconfig file.
-        if self.config['build_tool'] == 'make':
+        if self.target_config['build_tool'] == 'make':
             self._generate_defconfig()
+        elif self.target_config['build_tool'] == 'kraft':
+            self._generate_kraftfile()
 
 
 class RunConfig:
@@ -569,9 +666,9 @@ class RunConfig:
     fs_type = FS_TYPE_NONE
     run_script = None
 
-    def __init__(self, base_dir, config, app_config):
+    def __init__(self, base_dir, target_config, app_config):
         self.dir = base_dir
-        self.config = config
+        self.target_config = target_config
         self.app_config = app_config
 
     def get_run_tools(plat, arch):
