@@ -50,7 +50,7 @@ class TesterConfig:
         configuration file.
 
         Each exclude variant is a dictionary with various keys, e.g:
-        {'networking': 'brigde', 'platform': 'firecracker'}
+        {'networking': 'brigde', 'platform': 'fc'}
         """
 
         variants = self.config['variants']
@@ -284,16 +284,16 @@ class SystemConfig:
 
         qemu_x86_64_paths = self._get_paths("qemu-system-", "^qemu-system-x86_64$")
         qemu_arm64_paths = self._get_paths("qemu-system-", "^qemu-system-aarch64")
-        firecracker_x86_64_paths = self._get_paths("firecracker-", "^firecracker-x86_64")
-        firecracker_arm64_paths = self._get_paths("firecracker-", "^firecracker-aarch64")
+        fc_x86_64_paths = self._get_paths("firecracker-", "^firecracker-x86_64")
+        fc_arm64_paths = self._get_paths("firecracker-", "^firecracker-aarch64")
         self.vmms = {
                 'arm64': {
                     'qemu': qemu_arm64_paths,
-                    'firecracker': firecracker_arm64_paths
+                    'fc': fc_arm64_paths
                     },
                 'x86_64': {
                     'qemu': qemu_x86_64_paths,
-                    'firecracker': firecracker_x86_64_paths
+                    'fc': fc_x86_64_paths
                     }
                 }
 
@@ -363,9 +363,9 @@ class SystemConfig:
 
     def __str__(self):
         vmm_list = self.vmms["arm64"]["qemu"]
-        vmm_list.extend(self.vmms["arm64"]["firecracker"])
+        vmm_list.extend(self.vmms["arm64"]["fc"])
         vmm_list.extend(self.vmms["x86_64"]["qemu"])
-        vmm_list.extend(self.vmms["x86_64"]["firecracker"])
+        vmm_list.extend(self.vmms["x86_64"]["fc"])
         vmm_str = ", ".join(vmm for vmm in vmm_list)
 
         comp_list = self.compilers["arm64"]["gcc"]
@@ -468,8 +468,6 @@ class AppConfig:
             for t in data['targets']:
                 plat = t.split("/")[0]
                 arch = t.split("/")[1]
-                if plat == "fc":
-                    plat = "firecracker"
                 targets.append((plat, arch))
             self.config['targets'] = targets
 
@@ -565,13 +563,15 @@ class BuildConfig:
             if self.app_config.has_einitrd():
                 stream.write("CONFIG_LIBVFSCORE_AUTOMOUNT_CI_EINITRD=y\n")
                 stream.write("CONFIG_LIBVFSCORE_AUTOMOUNT_CI=y\n")
+                einitrd_cpio_path = os.path.join(self.dir, "initrd.cpio")
+                stream.write(f"CONFIG_LIBVFSCORE_AUTOMOUNT_EINITRD_PATH=\"{einitrd_cpio_path}\"\n")
             else:
                 stream.write("CONFIG_LIBVFSCORE_AUTOMOUNT_CI_EINITRD=n\n")
                 stream.write("CONFIG_LIBVFSCORE_AUTOMOUNT_CI=n\n")
             if self.target_config['platform'] == 'qemu':
                 stream.write("CONFIG_PLAT_KVM=y\n")
                 stream.write("CONFIG_KVM_VMM_QEMU=y\n")
-            if self.target_config['platform'] == 'firecracker':
+            if self.target_config['platform'] == 'fc':
                 stream.write("CONFIG_PLAT_KVM=y\n")
                 stream.write("CONFIG_KVM_VMM_FIRECRACKER=y\n")
             if self.target_config['arch'] == 'arm64':
@@ -599,7 +599,7 @@ class BuildConfig:
         if self.app_config.has_template():
             app_dir = os.path.join(os.path.join(self.target_config["base"], "apps"), self.app_config.config['template'])
         else:
-            app_dir="$(PWD)"
+            app_dir = os.getcwd()
         libs = ""
         if 'libraries' in self.app_config.config.keys():
             for l in self.app_config.config["libraries"].keys():
@@ -655,6 +655,8 @@ class BuildConfig:
                     if self.app_config.has_einitrd():
                         stream.write("    CONFIG_LIBVFSCORE_AUTOMOUNT_CI_EINITRD: 'y'\n")
                         stream.write("    CONFIG_LIBVFSCORE_AUTOMOUNT_CI: 'y'\n")
+                        einitrd_cpio_path = os.path.join(self.dir, "initrd.cpio")
+                        stream.write(f"    CONFIG_LIBVFSCORE_AUTOMOUNT_EINITRD_PATH: '{einitrd_cpio_path}'\n")
                     else:
                         stream.write("    CONFIG_LIBVFSCORE_AUTOMOUNT_CI_EINITRD: 'n'\n")
                         stream.write("    CONFIG_LIBVFSCORE_AUTOMOUNT_CI: 'n'\n")
@@ -674,16 +676,92 @@ class BuildConfig:
                                 v = f"\"{v}\""
                             stream.write(f"      {k}: {v}\n")
 
+    def _generate_build_make(self):
+        """Generate build script for Make-based build."""
+
+        with open(os.path.join(SCRIPT_DIR, "tpl_build_make.sh"), "r", encoding="utf-8") as stream:
+            raw_content = stream.read()
+
+        target_dir = self.dir
+
+        content = raw_content.format(**locals())
+
+        with open(os.path.join(self.dir, "build"), "w", encoding="utf-8") as stream:
+            stream.write(content)
+        os.chmod(os.path.join(self.dir, "build"), 0o755)
+
+    def _generate_build_make_einitrd(self):
+        """Generate build einitird script for Make-based build."""
+
+        with open(os.path.join(SCRIPT_DIR, "tpl_build_make_einitrd.sh"), "r", encoding="utf-8") as stream:
+            raw_content = stream.read()
+
+        if self.app_config.has_template():
+            app_dir = os.path.join(os.path.join(self.target_config["base"], "apps"), self.app_config.config['template'])
+        else:
+            app_dir = os.getcwd()
+        base = self.target_config["base"]
+        target_dir = self.dir
+        rootfs = os.path.join(os.getcwd(), self.app_config.config["rootfs"])
+        name = self.app_config.config["name"]
+
+        content = raw_content.format(**locals())
+
+        with open(os.path.join(self.dir, "build"), "w", encoding="utf-8") as stream:
+            stream.write(content)
+        os.chmod(os.path.join(self.dir, "build"), 0o755)
+
+    def _generate_fs(self):
+        """Generate file system for examples for Make-based build."""
+
+        with open(os.path.join(SCRIPT_DIR, "tpl_build_fs.sh"), "r", encoding="utf-8") as stream:
+            raw_content = stream.read()
+
+        base = self.target_config["base"]
+        target_dir = self.dir
+        rootfs = os.path.join(os.getcwd(), self.app_config.config["rootfs"])
+        name = self.app_config.config["name"]
+
+        content = raw_content.format(**locals())
+
+        with open(os.path.join(self.dir, "build"), "w", encoding="utf-8") as stream:
+            stream.write(content)
+        os.chmod(os.path.join(self.dir, "build"), 0o755)
+
+    def _generate_build_kraft(self):
+        """Generate build script for Kraft-based build."""
+
+        with open(os.path.join(SCRIPT_DIR, "tpl_build_kraft.sh"), "r", encoding="utf-8") as stream:
+            raw_content = stream.read()
+
+        if self.app_config.config["rootfs"]:
+            rootfs = os.path.join(os.getcwd(), self.app_config.config["rootfs"])
+        else:
+            rootfs = ""
+        target_dir = self.dir
+        plat = self.target_config["platform"]
+        arch = self.target_config["arch"]
+
+        content = raw_content.format(**locals())
+
+        with open(os.path.join(self.dir, "build"), "w", encoding="utf-8") as stream:
+            stream.write(content)
+        os.chmod(os.path.join(self.dir, "build"), 0o755)
+
     def generate(self):
-        # Generate build.sh script.
-        # Optionally, generate defconfig file.
         if self.target_config['build_tool'] == 'make':
-            self._generate_defconfig()
             if self.app_config.is_kernel():
+                self._generate_defconfig()
                 self._generate_makefile()
+                if self.app_config.has_einitrd():
+                    self._generate_build_make_einitrd()
+                else:
+                    self._generate_build_make()
+            else:
+                self._generate_fs()
         elif self.target_config['build_tool'] == 'kraft':
             self._generate_kraftfile()
-
+            self._generate_build_kraft()
 
 class RunConfig:
     NET_TYPE_NONE = None
