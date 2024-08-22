@@ -442,14 +442,20 @@ def generate_run_qemu(config, target, fs):
         if config["networking"]:
             stream.write("    -netdev bridge,id=en0,br=virbr0 ")
             stream.write("-device virtio-net-pci,netdev=en0 \\\n")
-            stream.write('    -append "netdev.ip=172.44.0.2/24:172.44.0.1::: ')
+            if target['arch'] == 'arm64':
+                stream.write('    -append "$kernel netdev.ip=172.44.0.2/24:172.44.0.1::: ')
+            else:
+                stream.write('    -append "netdev.ip=172.44.0.2/24:172.44.0.1::: ')
             if fs == "initrd":
                 stream.write('vfs.fstab=[ \\"initrd0:/:extract::ramfs=1:\\" ] ')
             elif fs == "9pfs":
                 stream.write('vfs.fstab=[ \\"fs0:/:9pfs:::\\" ] ')
             stream.write('-- $cmd" \\\n')
         else:
-            stream.write('    -append "')
+            if target['arch'] == 'arm64':
+                stream.write('    -append "$kernel ')
+            else:
+                stream.write('    -append "')
             if fs == "initrd":
                 stream.write('vfs.fstab=[ \\"initrd0:/:extract::ramfs=1:\\" ] ')
             elif fs == "9pfs":
