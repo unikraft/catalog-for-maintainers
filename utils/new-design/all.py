@@ -627,6 +627,10 @@ class BuildConfig:
                 stream.write("CONFIG_KVM_VMM_FIRECRACKER=y\n")
             if self.config['arch'] == 'arm64':
                 stream.write("CONFIG_ARCH_ARM_64=y\n")
+                if self.config['compiler']['type'] == 'clang':
+                    stream.write("CONFIG_ARM64_ERRATUM_858921=n\n")
+                    stream.write("CONFIG_ARM64_ERRATUM_835769=n\n")
+                    stream.write("CONFIG_ARM64_ERRATUM_843419=n\n")
             if self.config['arch'] == 'x86_64':
                 stream.write("CONFIG_ARCH_X86_64=y\n")
             if self.app_config.config["unikraft"]:
@@ -715,6 +719,11 @@ class BuildConfig:
                     else:
                         stream.write("    CONFIG_LIBVFSCORE_AUTOMOUNT_CI_EINITRD: 'n'\n")
                         stream.write("    CONFIG_LIBVFSCORE_AUTOMOUNT_CI: 'n'\n")
+                    if self.config['arch'] == 'arm64':
+                        if self.config['compiler']['type'] == 'clang':
+                            stream.write("    CONFIG_ARM64_ERRATUM_858921: 'n'\n")
+                            stream.write("    CONFIG_ARM64_ERRATUM_835769: 'n'\n")
+                            stream.write("    CONFIG_ARM64_ERRATUM_843419: 'n'\n")
                     stream.write("\n")
                 stream.write("\n")
 
@@ -731,6 +740,19 @@ class BuildConfig:
                                 v = f"\"{v}\""
                             stream.write(f"      {k}: {v}\n")
 
+    def _get_compiler_vars(self):
+        """Generate compiler variables, typically CROSS_COMPILE and
+        COMPILER.
+        """
+
+        if self.config['arch'] == 'x86_64':
+            return ("", self.config['compiler']['path'])
+        if self.config['arch'] == 'arm64':
+            idx = self.config['compiler']['path'].find(self.config['compiler']['type'])
+            cross_compile = f"export CROSS_COMPILE={self.config['compiler']['path'][0:idx]}"
+            compiler = self.config['compiler']['path'][idx:]
+            return (cross_compile, compiler)
+
     def _generate_build_make(self):
         """Generate build script for Make-based build."""
 
@@ -738,6 +760,7 @@ class BuildConfig:
             raw_content = stream.read()
 
         target_dir = self.dir
+        (cross_compile, compiler) = self._get_compiler_vars()
 
         content = raw_content.format(**locals())
 
@@ -759,6 +782,7 @@ class BuildConfig:
         target_dir = self.dir
         rootfs = os.path.join(os.getcwd(), self.app_config.config["rootfs"])
         name = self.app_config.config["name"]
+        (cross_compile, compiler) = self._get_compiler_vars()
 
         content = raw_content.format(**locals())
 
@@ -796,6 +820,7 @@ class BuildConfig:
         target_dir = self.dir
         plat = self.config["platform"]
         arch = self.config["arch"]
+        (cross_compile, compiler) = self._get_compiler_vars()
 
         content = raw_content.format(**locals())
 

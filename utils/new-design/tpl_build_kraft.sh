@@ -12,4 +12,6 @@ fi
 
 rm -fr {target_dir}/.unikraft/build
 rm -f {target_dir}/.config.*
+{cross_compile}
+export COMPILER={compiler}
 kraft build --log-level debug --log-type basic --no-cache --no-update --plat {plat} --arch {arch} {target_dir}
