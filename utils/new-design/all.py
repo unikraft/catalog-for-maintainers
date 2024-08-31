@@ -625,6 +625,8 @@ class BuildConfig:
             if self.config['platform'] == 'fc':
                 stream.write("CONFIG_PLAT_KVM=y\n")
                 stream.write("CONFIG_KVM_VMM_FIRECRACKER=y\n")
+            if self.config['platform'] == 'xen':
+                stream.write("CONFIG_PLAT_XEN=y\n")
             if self.config['arch'] == 'arm64':
                 stream.write("CONFIG_ARCH_ARM_64=y\n")
                 if self.config['compiler']['type'] == 'clang':
