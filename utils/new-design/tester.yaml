@@ -1,41 +1,44 @@
 variants:
-  arch:
-    - x86_64
-    - arm64
-  hypervisor:
-    - none
-    - xen
-    - kvm
-  platform:
-    - xen
-    - qemu
-    - fc
-  build_tool:
-    - make
-    - kraft
-  run_tool:
-    - vmm
-    - kraft
-  bootloader:
-    - multiboot
-    - uefi
-  pie:
-    - on
-    - off
-  debug:
-    - none
-    - strace
-    - info
-    - err
-    - debug
-  rootfs:
-    - initrd
-    - 9pfs
-  networking:
-    - none
-    - nat
-    - bridge
-    - tap
+  build:
+    arch:
+      - x86_64
+      - arm64
+    platform:
+      - xen
+      - qemu
+      - fc
+    build_tool:
+      - make
+      - kraft
+    bootloader:
+      - multiboot
+      - uefi
+    pie:
+      - on
+      - off
+    debug:
+      - none
+      - strace
+      - info
+      - err
+      - debug
+  run:
+    hypervisor:
+      - none
+      - xen
+      - kvm
+    run_tool:
+      - vmm
+      - kraft
+    rootfs:
+      - none
+      - initrd
+      - 9pfs
+    networking:
+      - none
+      - nat
+      - bridge
+      - tap
 exclude_variants:
   - networking: bridge
     platform: fc
@@ -48,9 +51,7 @@ exclude_variants:
   - platform: xen
     hypervisor: not xen
   - platform: qemu
-    hypervisor:
-      - not kvm
-      - not none
+    hypervisor: xen
   - platform: fc
     rootfs: 9pfs
   - bootloader: uefi
@@ -59,7 +60,6 @@ exclude_variants:
       - err
       - debug
   - pie: on
-  - platform: xen
 tools:
   compiler:
     - system

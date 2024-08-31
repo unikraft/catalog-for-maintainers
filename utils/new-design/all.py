@@ -24,6 +24,7 @@ class TesterConfig:
             with open(config_file, "r", encoding="utf8") as stream:
                 self.config = yaml.safe_load(stream)
                 self.variants = self._generate_variants()
+                self.target_configs = []
         except IOError:
             print(f"Error: Unable to open configuration file '{config_file}'", file=sys.stderr)
             return None
@@ -40,8 +41,21 @@ class TesterConfig:
         Return a list of all variants.
         """
 
-        variants = self.config['variants']
-        return list(dict(zip(variants.keys(), values)) for values in itertools.product(*variants.values()))
+        build_variants = self.config['variants']['build']
+        run_variants = self.config['variants']['run']
+        build_configs = list(dict(zip(build_variants.keys(), values)) for values in itertools.product(*build_variants.values()))
+        run_configs = list(dict(zip(run_variants.keys(), values)) for values in itertools.product(*run_variants.values()))
+
+        full_variants = []
+        for b in build_configs:
+            new_variant = {}
+            new_variant['build'] = b
+            new_variant['runs'] = []
+            for r in run_configs:
+                new_variant['runs'].append(r)
+            full_variants.append(new_variant)
+
+        return full_variants
 
     def _get_exclude_variants(self):
         """Get variants to be excluded from all possible variants.
@@ -53,7 +67,7 @@ class TesterConfig:
         {'networking': 'brigde', 'platform': 'fc'}
         """
 
-        variants = self.config['variants']
+        variants = {**self.config['variants']['build'], **self.config['variants']['run']}
         exclude_variants = self.config['exclude_variants']
         ret = []
 
@@ -61,13 +75,13 @@ class TesterConfig:
             tmp_dict = {}
             for k1, v1 in e.items():
                 if isinstance(v1, list):
-                    l = list(variants[k1])
+                    l = []
                     for v2 in v1:
                         if v2.startswith("not"):
                             tmp_l = list(set(variants[k1]) - set([v2.split(" ")[1]]))
                         else:
                             tmp_l = [v2]
-                        l = set.intersection(set(l), set(tmp_l))
+                        l = set.union(set(l), set(tmp_l))
                     tmp_dict[k1] = l
                 elif isinstance(v1, str):
                     if v1.startswith("not"):
@@ -89,11 +103,10 @@ class TesterConfig:
         between all variants (with _generate_full_variants()) and the excluded
         variants (with _get_exlude_variants()).
 
-        An exclude variant is a dictionary. A variant is a dictionary. If all
-        items in the exclude variant ar part of the variant, that variant is
-        not used.
+        An exclude variant is a dictionary. A variant is a dictionary with a
+        build configuration and an array of run configurations.
 
-        Return list of variants, i.e. a sublist of the full variants.
+        Return list of variants, i.e. a subset of full_variants.
         """
 
         exclude_variants = self._get_exclude_variants()
@@ -101,21 +114,48 @@ class TesterConfig:
         ret_variants = []
 
         for f in full_variants:
-            excluded = True
+            # First check if entire build variant is to be excluded
+            # (together # with all its run variants).
+            b = f['build']
             for e in exclude_variants:
                 excluded = True
                 for k, v in e.items():
-                    if f[k] != v:
+                    if k in b.keys():
+                        if b[k] != v:
+                            excluded = False
+                            break
+                    else:
                         excluded = False
                         break
                 if excluded:
                     break
-            if not excluded:
-                 ret_variants.append(f)
+            if excluded:
+                continue
+
+            # Check for run variants to be excluded.
+            run_variants = []
+            for r in f['runs']:
+                linear_variant = {**b, **r}
+                excluded = True
+                for e in exclude_variants:
+                    excluded = True
+                    for k, v in e.items():
+                        if linear_variant[k] != v:
+                            excluded = False
+                            break
+                    if excluded:
+                        break
+                if excluded:
+                    continue
+                run_variants.append(r)
+            ret_variants.append({
+                'build': b,
+                'runs': run_variants
+                })
 
         return ret_variants
 
-    def _generate_compilers(self, plat, arch, system_comp):
+    def _generate_compilers(self, plat, arch, sys_compilers):
         """Generate compiler configurations.
 
         Generate compiler configurations using system compiler configuration
@@ -138,11 +178,11 @@ class TesterConfig:
                         })
                 continue
             if c == "system":
-                compilers.append(system_comp)
+                compilers += sys_compilers
 
         return compilers
 
-    def _generate_vmms(self, plat, arch, system_vmm):
+    def _generate_vmms(self, plat, arch, sys_vmms):
         """Generate VMM configurations.
 
         Generate VMM configurations using system VMM configuration and tester
@@ -164,38 +204,61 @@ class TesterConfig:
                         })
                 continue
             if v == "system":
-                vmms.append(system_vmm)
+                vmms += sys_vmms
 
         return vmms
 
-    def get_target_configs(self, plat, arch, vmm, comp, build_tool, run_tool):
-        """Get configurations for target.
+    def generate_target_configs(self, plat, arch, sys_vmms, sys_compilers, build_tools, run_tools):
+        """Generate configurations for target.
 
         The target is defined by the platform, architecture, system VMMs,
         system compiler, build tools and run tools. Do an intersection between
-        the valid_variants list and the target specification.
+        the valid variants list and the target specification.
 
         Return list of target configurations. Each item in the list is a
         dictionary, e.g.:
         {'arch': 'x86_64', ..., 'base': '...', 'compiler': '...' }'
         """
 
-        target_configs = []
-
         for v in self.variants:
-            if plat == v['platform'] and \
-                    arch == v['arch'] and \
-                    build_tool == v['build_tool'] and \
-                    run_tool == v['run_tool']:
-                _config = v
-                _config['base'] = self.config['source']['base']
-                for _comp in self._generate_compilers(plat, arch, comp):
-                    _config['compiler'] = _comp
-                    for _vmm in self._generate_vmms(plat, arch, vmm):
-                        _config['vmm'] = _vmm
-                        target_configs.append(_config)
+            for b in build_tools:
+                if not (plat == v['build']['platform'] and \
+                        arch == v['build']['arch'] and \
+                        b == v['build']['build_tool']):
+                    continue
 
-        return target_configs
+                vmm_list = self._generate_vmms(plat, arch, sys_vmms)
+                comp_list = self._generate_compilers(plat, arch, sys_compilers)
+                if not comp_list:
+                    continue
+                for comp in comp_list:
+                    _config = {}
+                    _config['build'] = v['build'].copy()
+                    _config['base'] = self.config['source']['base']
+
+                    _config['build']['compiler'] = comp
+
+                    if not vmm_list:
+                        _config['run'] = {}
+                        _config['run']['vmm'] = None
+                        _config['run']['runs'] = []
+                        self.target_configs.append(_config)
+                        continue
+
+                    for vmm in vmm_list:
+                        _config['run'] = {}
+                        _config['run']['vmm'] = vmm
+                        _config['run']['runs'] = []
+                        for r in v['runs']:
+                            for rt in run_tools:
+                                if rt == r['run_tool']:
+                                    _config['run']['runs'].append(r)
+                        self.target_configs.append(_config)
+
+    def get_target_configs(self):
+        """Retrieve target configurations."""
+
+        return self.target_configs
 
     def __str__(self):
         return str(self.config)
@@ -324,6 +387,10 @@ class SystemConfig:
         """
 
         ret_list = []
+        if not arch in self.vmms.keys():
+            return []
+        if not plat in self.vmms[arch].keys():
+            return []
         for v in self.vmms[arch][plat]:
             ret_list.append({
                 "type": plat,
@@ -511,8 +578,10 @@ class TargetConfig:
         else:
             base = os.path.abspath('.tests')
         self.dir = os.path.join(base, "{:05d}".format(self.id))
-        self.build_config = BuildConfig(self.dir, self.config, app_config)
-        self.run_config = RunConfig(self.dir, self.config, app_config)
+        self.build_config = BuildConfig(self.dir, self.config['build'], self.config, app_config)
+        self.run_configs = []
+        for r in self.config['run']['runs']:
+            self.run_configs.append(RunConfig(self.dir, r, self.config, app_config))
 
     def generate(self):
         # Create directory.
@@ -521,13 +590,15 @@ class TargetConfig:
         with open(os.path.join(self.dir, 'config.yaml'), 'w') as outfile:
             yaml.dump(self.config, outfile, default_flow_style=False)
         self.build_config.generate()
-        self.run_config.generate()
+        for r in self.run_configs:
+            r.generate()
 
 
 class BuildConfig:
 
-    def __init__(self, base_dir, target_config, app_config):
+    def __init__(self, base_dir, config, target_config, app_config):
         self.dir = base_dir
+        self.config = config
         self.target_config = target_config
         self.app_config = app_config
 
@@ -548,15 +619,15 @@ class BuildConfig:
             else:
                 stream.write("CONFIG_LIBVFSCORE_AUTOMOUNT_CI_EINITRD=n\n")
                 stream.write("CONFIG_LIBVFSCORE_AUTOMOUNT_CI=n\n")
-            if self.target_config['platform'] == 'qemu':
+            if self.config['platform'] == 'qemu':
                 stream.write("CONFIG_PLAT_KVM=y\n")
                 stream.write("CONFIG_KVM_VMM_QEMU=y\n")
-            if self.target_config['platform'] == 'fc':
+            if self.config['platform'] == 'fc':
                 stream.write("CONFIG_PLAT_KVM=y\n")
                 stream.write("CONFIG_KVM_VMM_FIRECRACKER=y\n")
-            if self.target_config['arch'] == 'arm64':
+            if self.config['arch'] == 'arm64':
                 stream.write("CONFIG_ARCH_ARM_64=y\n")
-            if self.target_config['arch'] == 'x86_64':
+            if self.config['arch'] == 'x86_64':
                 stream.write("CONFIG_ARCH_X86_64=y\n")
             if self.app_config.config["unikraft"]:
                 for k, v in self.app_config.config["unikraft"]["kconfig"].items():
@@ -624,7 +695,7 @@ class BuildConfig:
                 stream.write(f"  source: {template_path}\n\n")
 
             stream.write("targets:\n")
-            stream.write(f"- {self.target_config['platform']}/{self.target_config['arch']}\n\n")
+            stream.write(f"- {self.config['platform']}/{self.config['arch']}\n\n")
 
             if self.app_config.config['unikraft']:
                 unikraft_path = os.path.join(self.target_config["base"], "unikraft")
@@ -723,8 +794,8 @@ class BuildConfig:
         else:
             rootfs = ""
         target_dir = self.dir
-        plat = self.target_config["platform"]
-        arch = self.target_config["arch"]
+        plat = self.config["platform"]
+        arch = self.config["arch"]
 
         content = raw_content.format(**locals())
 
@@ -733,7 +804,7 @@ class BuildConfig:
         os.chmod(os.path.join(self.dir, "build"), 0o755)
 
     def generate(self):
-        if self.target_config['build_tool'] == 'make':
+        if self.config['build_tool'] == 'make':
             if self.app_config.is_kernel():
                 self._generate_defconfig()
                 self._generate_makefile()
@@ -743,15 +814,16 @@ class BuildConfig:
                     self._generate_build_make()
             else:
                 self._generate_fs()
-        elif self.target_config['build_tool'] == 'kraft':
+        elif self.config['build_tool'] == 'kraft':
             self._generate_kraftfile()
             self._generate_build_kraft()
 
 
 class RunConfig:
 
-    def __init__(self, base_dir, target_config, app_config):
+    def __init__(self, base_dir, config, target_config, app_config):
         self.dir = base_dir
+        self.config = config
         self.target_config = target_config
         self.app_config = app_config
 
@@ -768,15 +840,17 @@ class TestRunner:
 
 
 def generate_target_configs(tester_config, app_config, system_config):
-    targets = []
     for (plat, arch) in app_config.config['targets']:
-        for vmm in system_config.get_vmms(plat, arch):
-            for comp in system_config.get_compilers(plat, arch):
-                for build_tool in BuildConfig.get_build_tools(plat, arch):
-                    for run_tool in RunConfig.get_run_tools(plat, arch):
-                        for config in tester_config.get_target_configs(plat, arch, vmm, comp, build_tool, run_tool):
-                            t = TargetConfig(config, app_config, system_config)
-                            targets.append(t)
+        vmms = system_config.get_vmms(plat, arch)
+        compilers = system_config.get_compilers(plat, arch)
+        build_tools = BuildConfig.get_build_tools(plat, arch)
+        run_tools = RunConfig.get_run_tools(plat, arch)
+        tester_config.generate_target_configs(plat, arch, vmms, compilers, build_tools, run_tools)
+
+    targets = []
+    for config in tester_config.get_target_configs():
+        t = TargetConfig(config, app_config, system_config)
+        targets.append(t)
     return targets
 
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
@@ -784,6 +858,7 @@ SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 t = TesterConfig("../../../utils/new-design/tester.yaml")
 a = AppConfig()
 s = SystemConfig()
+
 
 targets = generate_target_configs(t, a, s)
 for t in targets:
