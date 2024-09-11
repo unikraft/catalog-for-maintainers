@@ -472,6 +472,12 @@ class AppConfig:
     def is_bincompat(self):
         return self.has_template()
 
+    def has_networking(self):
+        return self.config['networking']
+
+    def has_rootfs(self):
+        return self.config['rootfs']
+
     def _parse_user_config(self, user_config_file):
         with open(user_config_file, "r", encoding="utf-8") as stream:
             data = yaml.safe_load(stream)
@@ -580,17 +586,34 @@ class TargetConfig:
         self.dir = os.path.join(base, "{:05d}".format(self.id))
         self.build_config = BuildConfig(self.dir, self.config['build'], self.config, app_config)
         self.run_configs = []
+        idx = 1
         for r in self.config['run']['runs']:
-            self.run_configs.append(RunConfig(self.dir, r, self.config, app_config))
+            if r["networking"] == "none" and app_config.config["networking"] == True:
+                continue
+            if r["networking"] != "none" and app_config.config["networking"] == False:
+                continue
+            if r['rootfs'] != 'none' and app_config.has_einitrd():
+                continue
+            if r['rootfs'] == 'none' and not app_config.has_einitrd() and app_config.has_rootfs():
+                continue
+            run_dir = os.path.join(self.dir, "run-{:02d}".format(idx))
+            idx += 1
+            self.run_configs.append(RunConfig(run_dir, r, self.config, self.build_config, app_config))
 
     def generate(self):
         # Create directory.
         os.mkdir(self.dir, mode=0o755)
         # Generate config.yaml.
         with open(os.path.join(self.dir, 'config.yaml'), 'w') as outfile:
-            yaml.dump(self.config, outfile, default_flow_style=False)
+            outfile.write(f"base: {self.config['base']}\n")
+            yaml.dump(self.config["build"], outfile, default_flow_style=False)
+            if self.config['run']['vmm']:
+                outfile.write(f"vmm: {self.config['run']['vmm']['path']}\n")
         self.build_config.generate()
         for r in self.run_configs:
+            os.mkdir(r.dir, mode=0o755)
+            with open(os.path.join(r.dir, 'config.yaml'), 'w') as outfile:
+                yaml.dump(r.config, outfile, default_flow_style=False)
             r.generate()
 
 
@@ -601,6 +624,8 @@ class BuildConfig:
         self.config = config
         self.target_config = target_config
         self.app_config = app_config
+        self.kernel_name = None
+        self.kernel_path = None
 
     def get_build_tools(plat, arch):
         return ["make", "kraft"]
@@ -742,6 +767,46 @@ class BuildConfig:
                                 v = f"\"{v}\""
                             stream.write(f"      {k}: {v}\n")
 
+    def _generate_run_kraftfile(self):
+        """Generate minimal Kraftfile for run Kraft-based runs in case of
+        Make-based builds.
+
+        The generated Kraftfile contains only minimal information:
+          - spec
+          - name
+          - rootfs
+          - targets
+          - cmd
+          - runtime or kernel
+        Custom einitrd configuration, debug levels configuration is added.
+        """
+
+        with open(os.path.join(self.dir, "Kraftfile"), "w", encoding="utf-8") as stream:
+            stream.write("spec: v0.6\n\n")
+
+            stream.write(f"name: {self.app_config.config['name']}\n\n")
+
+            if self.app_config.config['runtime']:
+                stream.write(f"runtime: {self.app_config.config['runtime']}\n\n")
+
+            if self.app_config.config['rootfs']:
+                if os.path.basename(self.app_config.config['rootfs']) == "Dockerfile":
+                    rootfs = os.path.join(os.getcwd(), self.app_config.config["rootfs"])
+                else:
+                    rootfs = os.path.join(self.dir, "rootfs")
+                stream.write(f"rootfs: {rootfs}\n\n")
+
+            if self.app_config.config['cmd']:
+                stream.write(f"cmd: \"{self.app_config.config['cmd']}\"\n\n")
+
+            stream.write("targets:\n")
+            stream.write(f"- {self.config['platform']}/{self.config['arch']}\n\n")
+
+            if self.app_config.config['unikraft']:
+                unikraft_path = os.path.join(self.target_config["base"], "unikraft")
+                stream.write("unikraft:\n")
+                stream.write(f"  source: {unikraft_path}\n")
+
     def _get_compiler_vars(self):
         """Generate compiler variables, typically CROSS_COMPILE and
         COMPILER.
@@ -839,6 +904,9 @@ class BuildConfig:
                     self._generate_build_make_einitrd()
                 else:
                     self._generate_build_make()
+                self._generate_run_kraftfile()
+                self.kernel_name = f"{self.app_config.config['name']}_{self.config['platform']}-{self.config['arch']}"
+                self.kernel_path = os.path.join(os.path.join(os.path.join(self.dir, ".unikraft"), "build"), self.kernel_name)
             else:
                 self._generate_fs()
         elif self.config['build_tool'] == 'kraft':
@@ -848,19 +916,89 @@ class BuildConfig:
 
 class RunConfig:
 
-    def __init__(self, base_dir, config, target_config, app_config):
+    def __init__(self, base_dir, config, target_config, build_config, app_config):
         self.dir = base_dir
         self.config = config
         self.target_config = target_config
+        self.build_config = build_config
         self.app_config = app_config
 
     def get_run_tools(plat, arch):
         return ["vmm", "kraft"]
 
-    def generate(self):
-        # Generate run.sh script.
+    def _generate_run_script_from_template(self, template_name):
+        with open(os.path.join(SCRIPT_DIR, template_name), "r", encoding="utf-8") as stream:
+            raw_content = stream.read()
+
+        base = self.target_config["base"]
+        name = self.app_config.config["name"]
+        run_dir = self.dir
+        target_dir = os.path.dirname(self.dir)
+        plat = self.target_config["build"]["platform"]
+        arch = self.target_config["build"]["arch"]
+        memory = f"{self.app_config.config['memory']}M"
+        cmd = self.app_config.config["cmd"]
+        kernel = self.build_config.kernel_path
+        port_ext = "8080"
+        port_int = "8080"
+        if self.target_config["run"]["vmm"]:
+            vmm = self.target_config["run"]["vmm"]["path"]
+        hypervisor_option = ""
+        if self.config['hypervisor'] != 'none':
+            if self.target_config['build']['platform'] == 'qemu':
+                if self.config['run_tool'] == 'vmm':
+                    hypervisor_option = "-enable-kvm"
+        if self.config['hypervisor'] == 'none':
+            if self.target_config['build']['platform'] == 'qemu':
+                if self.config['run_tool'] == 'kraft':
+                    hypervisor_option = "-W"
+
+        content = raw_content.format(**locals())
+
+        with open(os.path.join(self.dir, "run"), "w", encoding="utf-8") as stream:
+            stream.write(content)
+        os.chmod(os.path.join(self.dir, "run"), 0o755)
+
+    def _generate_firecracker(self):
         pass
 
+    def _generate_qemu(self):
+        if self.app_config.has_einitrd():
+            if self.config["networking"] == "bridge":
+                self._generate_run_script_from_template(f"tpl_run_qemu_net_if_noinitrd.sh")
+            elif self.config["networking"] == "nat":
+                self._generate_run_script_from_template(f"tpl_run_qemu_net_nat_noinitrd.sh")
+            else:
+                self._generate_run_script_from_template(f"tpl_run_qemu_nonet_noinitrd.sh")
+        else:
+            if self.config["networking"] == "bridge":
+                self._generate_run_script_from_template(f"tpl_run_qemu_net_if_initrd.sh")
+            elif self.config["networking"] == "nat":
+                self._generate_run_script_from_template(f"tpl_run_qemu_net_nat_initrd.sh")
+            else:
+                self._generate_run_script_from_template(f"tpl_run_qemu_nonet_initrd.sh")
+
+    def _generate_xen(self):
+        pass
+
+    def _generate_kraft(self):
+        if self.config["networking"] == "bridge":
+            self._generate_run_script_from_template(f"tpl_run_kraft_net_if.sh")
+        elif self.config["networking"] == "nat":
+            self._generate_run_script_from_template(f"tpl_run_kraft_net_nat.sh")
+        else:
+            self._generate_run_script_from_template(f"tpl_run_kraft_nonet.sh")
+
+    def generate(self):
+        if self.config['run_tool'] == 'vmm':
+            if self.target_config['build']['platform'] == 'fc':
+                self._generate_firecracker()
+            elif self.target_config['build']['platform'] == 'qemu':
+                self._generate_qemu()
+            elif self.target_config['build']['platform'] == 'xen':
+                self._generate_xen()
+        elif self.config['run_tool'] == 'kraft':
+            self._generate_kraft()
 
 class TestRunner:
     pass
