@@ -971,30 +971,24 @@ class RunConfig:
 
     def _generate_qemu(self):
         if self.app_config.has_einitrd():
-            if self.config["networking"] == "bridge":
-                self._generate_run_script_from_template(f"tpl_run_qemu_net_if_noinitrd.sh")
-            elif self.config["networking"] == "nat":
+            if self.config["networking"] == "none":
                 self._generate_run_script_from_template(f"tpl_run_qemu_net_nat_noinitrd.sh")
             else:
-                self._generate_run_script_from_template(f"tpl_run_qemu_nonet_noinitrd.sh")
+                self._generate_run_script_from_template(f"tpl_run_qemu_net_{self.config['networking']}_noinitrd.sh")
         else:
-            if self.config["networking"] == "bridge":
-                self._generate_run_script_from_template(f"tpl_run_qemu_net_if_initrd.sh")
-            elif self.config["networking"] == "nat":
+            if self.config["networking"] == "none":
                 self._generate_run_script_from_template(f"tpl_run_qemu_net_nat_initrd.sh")
             else:
-                self._generate_run_script_from_template(f"tpl_run_qemu_nonet_initrd.sh")
+                self._generate_run_script_from_template(f"tpl_run_qemu_net_{self.config['networking']}_initrd.sh")
 
     def _generate_xen(self):
         pass
 
     def _generate_kraft(self):
-        if self.config["networking"] == "bridge":
-            self._generate_run_script_from_template(f"tpl_run_kraft_net_if.sh")
-        elif self.config["networking"] == "nat":
-            self._generate_run_script_from_template(f"tpl_run_kraft_net_nat.sh")
-        else:
+        if self.config["networking"] == "none" or self.config["networking"] == "tap":
             self._generate_run_script_from_template(f"tpl_run_kraft_nonet.sh")
+        else:
+            self._generate_run_script_from_template(f"tpl_run_kraft_net_{self.config['networking']}.sh")
 
     def generate(self):
         if self.config['run_tool'] == 'vmm':
