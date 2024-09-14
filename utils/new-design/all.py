@@ -500,6 +500,13 @@ class AppConfig:
         else:
             self.config["memory"] = data["memory"]
 
+        if not "exposed_port" in data.keys():
+            self.config["exposed_port"] = None
+            self.config["public_port"] = None
+        else:
+            self.config["exposed_port"] = data["exposed_port"]
+            self.config["public_port"] = data["public_port"]
+
     def _parse_app_config(self, app_config_file):
         with open(app_config_file, "r", encoding="utf-8") as stream:
             data = yaml.safe_load(stream)
@@ -939,8 +946,8 @@ class RunConfig:
         memory = f"{self.app_config.config['memory']}M"
         cmd = self.app_config.config["cmd"]
         kernel = self.build_config.kernel_path
-        port_ext = "8080"
-        port_int = "8080"
+        port_ext = self.app_config.config["public_port"]
+        port_int = self.app_config.config["exposed_port"]
         if self.target_config["run"]["vmm"]:
             vmm = self.target_config["run"]["vmm"]["path"]
         hypervisor_option = ""
