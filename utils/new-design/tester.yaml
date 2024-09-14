@@ -40,7 +40,7 @@ variants:
       - bridge
       - tap
 exclude_variants:
-  - networking: bridge
+  - networking: nat
     platform: fc
   - networking: tap
     platform: not fc
@@ -55,6 +55,11 @@ exclude_variants:
   - platform: fc
     rootfs: 9pfs
   - bootloader: uefi
+  - networking: nat
+    run_tool: kraft
+    platform: not qemu
+  - networking: tap
+    run_tool: kraft
   - debug:
       - info
       - err

@@ -631,8 +631,8 @@ class BuildConfig:
         self.config = config
         self.target_config = target_config
         self.app_config = app_config
-        self.kernel_name = None
-        self.kernel_path = None
+        self.kernel_name = f"{self.app_config.config['name']}_{self.config['platform']}-{self.config['arch']}"
+        self.kernel_path = os.path.join(os.path.join(os.path.join(self.dir, ".unikraft"), "build"), self.kernel_name)
 
     def get_build_tools(plat, arch):
         return ["make", "kraft"]
@@ -912,8 +912,6 @@ class BuildConfig:
                 else:
                     self._generate_build_make()
                 self._generate_run_kraftfile()
-                self.kernel_name = f"{self.app_config.config['name']}_{self.config['platform']}-{self.config['arch']}"
-                self.kernel_path = os.path.join(os.path.join(os.path.join(self.dir, ".unikraft"), "build"), self.kernel_name)
             else:
                 self._generate_fs()
         elif self.config['build_tool'] == 'kraft':
@@ -933,7 +931,7 @@ class RunConfig:
     def get_run_tools(plat, arch):
         return ["vmm", "kraft"]
 
-    def _generate_run_script_from_template(self, template_name):
+    def _generate_from_template(self, template_name, output_name):
         with open(os.path.join(SCRIPT_DIR, template_name), "r", encoding="utf-8") as stream:
             raw_content = stream.read()
 
@@ -962,12 +960,31 @@ class RunConfig:
 
         content = raw_content.format(**locals())
 
-        with open(os.path.join(self.dir, "run"), "w", encoding="utf-8") as stream:
+        with open(os.path.join(self.dir, output_name), "w", encoding="utf-8") as stream:
             stream.write(content)
+
+    def _generate_fc_config_from_template(self, template_name):
+        self._generate_from_template(template_name, "config.json")
+
+    def _generate_run_script_from_template(self, template_name):
+        self._generate_from_template(template_name, "run")
         os.chmod(os.path.join(self.dir, "run"), 0o755)
 
     def _generate_firecracker(self):
-        pass
+        if self.app_config.has_einitrd():
+            if self.config["networking"] == "none":
+                self._generate_fc_config_from_template(f"tpl_run_firecracker_nonet_noinitrd.json")
+                self._generate_run_script_from_template(f"tpl_run_firecracker_nonet_noinitrd.sh")
+            else:
+                self._generate_fc_config_from_template(f"tpl_run_firecracker_net_{self.config['networking']}_noinitrd.json")
+                self._generate_run_script_from_template(f"tpl_run_firecracker_net_{self.config['networking']}_noinitrd.sh")
+        else:
+            if self.config["networking"] == "none":
+                self._generate_fc_config_from_template(f"tpl_run_firecracker_nonet_initrd.json")
+                self._generate_run_script_from_template(f"tpl_run_firecracker_nonet_initrd.sh")
+            else:
+                self._generate_fc_config_from_template(f"tpl_run_firecracker_net_{self.config['networking']}_initrd.json")
+                self._generate_run_script_from_template(f"tpl_run_firecracker_net_{self.config['networking']}_initrd.sh")
 
     def _generate_qemu(self):
         if self.app_config.has_einitrd():
@@ -985,7 +1002,7 @@ class RunConfig:
         pass
 
     def _generate_kraft(self):
-        if self.config["networking"] == "none" or self.config["networking"] == "tap":
+        if self.config["networking"] == "none":
             self._generate_run_script_from_template(f"tpl_run_kraft_nonet.sh")
         else:
             self._generate_run_script_from_template(f"tpl_run_kraft_net_{self.config['networking']}.sh")
