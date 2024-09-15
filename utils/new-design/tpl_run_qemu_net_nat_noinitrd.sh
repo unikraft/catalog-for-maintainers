@@ -17,6 +17,7 @@ kraft rm --all
 
 {vmm} \
     {hypervisor_option} \
+    {machine} \
     -kernel "$kernel" \
     -nographic \
     -m {memory} \

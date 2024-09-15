@@ -209,7 +209,7 @@ class TesterConfig:
 
         return vmms
 
-    def generate_target_configs(self, plat, arch, sys_vmms, sys_compilers, build_tools, run_tools):
+    def generate_target_configs(self, plat, arch, sys_arch, sys_vmms, sys_compilers, build_tools, run_tools):
         """Generate configurations for target.
 
         The target is defined by the platform, architecture, system VMMs,
@@ -253,7 +253,8 @@ class TesterConfig:
                         for r in v['runs']:
                             for rt in run_tools:
                                 if rt == r['run_tool']:
-                                    _config['run']['runs'].append(r)
+                                    if r['hypervisor'] == 'none' or (r['hypervisor'] != 'none' and arch == sys_arch):
+                                        _config['run']['runs'].append(r)
                         self.target_configs.append(_config)
 
     def get_target_configs(self):
@@ -298,6 +299,14 @@ class SystemConfig:
         """
 
         self.arch = platform.machine()
+        if self.arch == "aarch64":
+            self.arch = "arm64"
+
+    def get_arch(self):
+        """Return machine architecture information.
+        """
+
+        return self.arch
 
     def _get_hypervisor(self):
         """Get hypervisor information.
@@ -606,7 +615,7 @@ class TargetConfig:
                 continue
             run_dir = os.path.join(self.dir, "run-{:02d}".format(idx))
             idx += 1
-            self.run_configs.append(RunConfig(run_dir, r, self.config, self.build_config, app_config))
+            self.run_configs.append(RunConfig(run_dir, r, self.config, self.build_config, app_config, system_config.get_arch()))
 
     def generate(self):
         # Create directory.
@@ -922,12 +931,13 @@ class BuildConfig:
 
 class RunConfig:
 
-    def __init__(self, base_dir, config, target_config, build_config, app_config):
+    def __init__(self, base_dir, config, target_config, build_config, app_config, sys_arch):
         self.dir = base_dir
         self.config = config
         self.target_config = target_config
         self.build_config = build_config
         self.app_config = app_config
+        self.sys_arch = sys_arch
 
     def get_run_tools(plat, arch):
         return ["vmm", "kraft"]
@@ -958,6 +968,11 @@ class RunConfig:
             if self.target_config['build']['platform'] == 'qemu':
                 if self.config['run_tool'] == 'kraft':
                     hypervisor_option = "-W"
+        machine = ""
+        if arch != self.sys_arch:
+            machine = "-machine virt"
+        if self.config["networking"] == "nat" and arch == "arm64":
+            name = ""
 
         content = raw_content.format(**locals())
 
@@ -1036,7 +1051,7 @@ def generate_target_configs(tester_config, app_config, system_config):
         compilers = system_config.get_compilers(plat, arch)
         build_tools = BuildConfig.get_build_tools(plat, arch)
         run_tools = RunConfig.get_run_tools(plat, arch)
-        tester_config.generate_target_configs(plat, arch, vmms, compilers, build_tools, run_tools)
+        tester_config.generate_target_configs(plat, arch, system_config.get_arch(), vmms, compilers, build_tools, run_tools)
 
     targets = []
     for config in tester_config.get_target_configs():

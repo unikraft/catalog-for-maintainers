@@ -32,6 +32,7 @@ sudo ip link set dev virbr0 up
 
 sudo {vmm} \
     {hypervisor_option} \
+    {machine} \
     -kernel "$kernel" \
     -nographic \
     -m {memory} \

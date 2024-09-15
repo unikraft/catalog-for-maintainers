@@ -36,6 +36,7 @@ rootfs={target_dir}/rootfs
 {base}/unikraft/support/scripts/mkcpio {run_dir}/initrd.cpio "$rootfs"
 sudo {vmm} \
     {hypervisor_option} \
+    {machine} \
     -kernel "$kernel" \
     -nographic \
     -m {memory} \
