@@ -7,6 +7,7 @@ import re
 import shutil
 import sys
 import string
+import distutils
 
 SCRIPT_DIR = "."
 
@@ -1022,6 +1023,13 @@ class TestRunner:
     pass
 
 
+
+def copy_common():
+    base = os.path.abspath('.tests')
+    dest = os.path.join(base, "common")
+    src = os.path.join(SCRIPT_DIR, "common")
+    distutils.dir_util.copy_tree(src, dest, update=1)
+
 def generate_target_configs(tester_config, app_config, system_config):
     for (plat, arch) in app_config.config['targets']:
         vmms = system_config.get_vmms(plat, arch)
@@ -1042,6 +1050,7 @@ t = TesterConfig("../../../utils/new-design/tester.yaml")
 a = AppConfig()
 s = SystemConfig()
 
+copy_common()
 
 targets = generate_target_configs(t, a, s)
 for t in targets:
