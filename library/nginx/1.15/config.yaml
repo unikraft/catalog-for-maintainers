@@ -1,0 +1,4 @@
+networking: True
+memory: 32
+exposed_port: 80
+public_port: 8080
