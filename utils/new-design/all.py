@@ -974,6 +974,7 @@ class RunConfig:
         if self.config["networking"] == "nat" and arch == "arm64":
             name = ""
 
+        print(template_name)
         content = raw_content.format(**locals())
 
         with open(os.path.join(self.dir, output_name), "w", encoding="utf-8") as stream:
@@ -1061,12 +1062,30 @@ def generate_target_configs(tester_config, app_config, system_config):
 
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 
-t = TesterConfig("../../../utils/new-design/tester.yaml")
-a = AppConfig()
-s = SystemConfig()
 
-copy_common()
+def usage(argv0):
+    print(f"Usage: {argv0} <path/to/tester.yaml>", file=sys.stderr)
 
-targets = generate_target_configs(t, a, s)
-for t in targets:
-    t.generate()
+
+def main():
+    if (len(sys.argv) != 2):
+        usage(sys.argv[0])
+        sys.exit(1)
+
+    if not os.path.exists(sys.argv[1]):
+        print(f"Not a file: {sys.argv[1]}")
+        sys.exit(1)
+
+    t = TesterConfig(sys.argv[1])
+    a = AppConfig()
+    s = SystemConfig()
+
+    copy_common()
+
+    targets = generate_target_configs(t, a, s)
+    for t in targets:
+        t.generate()
+
+
+if __name__ == "__main__":
+    sys.exit(main())
