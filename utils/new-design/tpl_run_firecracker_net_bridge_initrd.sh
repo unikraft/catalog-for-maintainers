@@ -32,7 +32,7 @@ sudo ip link set dev virbr0@if0 master virbr0
 # Add IP address to bridge interface
 sudo ip address add 172.44.0.1/24 dev virbr0
 
-rootfs={rootfs}
+rootfs={target_dir}/rootfs
 
 # Create CPIO archive to be used as the initrd.
 {base}/unikraft/support/scripts/mkcpio {run_dir}/initrd.cpio "$rootfs"

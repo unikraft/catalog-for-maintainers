@@ -609,7 +609,7 @@ class TargetConfig:
                 continue
             if r["networking"] != "none" and app_config.config["networking"] == False:
                 continue
-            if r['rootfs'] != 'none' and app_config.has_einitrd():
+            if r['rootfs'] != 'none' and (app_config.has_einitrd() or not app_config.has_rootfs()):
                 continue
             if r['rootfs'] == 'none' and not app_config.has_einitrd() and app_config.has_rootfs():
                 continue
@@ -987,7 +987,7 @@ class RunConfig:
         os.chmod(os.path.join(self.dir, "run"), 0o755)
 
     def _generate_firecracker(self):
-        if self.app_config.has_einitrd():
+        if self.app_config.has_einitrd() or not self.app_config.has_rootfs():
             if self.config["networking"] == "none":
                 self._generate_fc_config_from_template(f"tpl_run_firecracker_nonet_noinitrd.json")
                 self._generate_run_script_from_template(f"tpl_run_firecracker_nonet_noinitrd.sh")
@@ -1003,7 +1003,7 @@ class RunConfig:
                 self._generate_run_script_from_template(f"tpl_run_firecracker_net_{self.config['networking']}_initrd.sh")
 
     def _generate_qemu(self):
-        if self.app_config.has_einitrd():
+        if self.app_config.has_einitrd() or not self.app_config.has_rootfs():
             if self.config["networking"] == "none":
                 self._generate_run_script_from_template(f"tpl_run_qemu_net_nat_noinitrd.sh")
             else:
