@@ -51,6 +51,8 @@ targets:
 - qemu/arm64
 - fc/x86_64
 - fc/arm64
+- xen/x86_64
+- xen/arm64
 
 libraries:
   musl: staging
